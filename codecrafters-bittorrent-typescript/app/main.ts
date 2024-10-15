@@ -17,11 +17,10 @@ interface ParamsDiscoverPeers {
 }
 
 function decodeBencode(bencodedValue: string): [BencodedValue, number] {
-  /* This function is used to decode a bencoded string
-    The bencoded string is a string that is prefixed by the length of the string
-    **/
+  /* This function is used to decode a bencoded string */
 
   // Decode string
+  //console.log(bencodedValue);
   if (!isNaN(parseInt(bencodedValue[0]))) {
     const firstColonIndex = bencodedValue.indexOf(":");
     if (firstColonIndex === -1) {
@@ -35,7 +34,7 @@ function decodeBencode(bencodedValue: string): [BencodedValue, number] {
   }
 
   // Decode int
-  if (bencodedValue[0] === "i") {
+  else if (bencodedValue[0] === "i") {
     const firstEIndex = bencodedValue.indexOf("e");
     return [
       Number.parseFloat(bencodedValue.slice(1, firstEIndex)),
@@ -44,7 +43,7 @@ function decodeBencode(bencodedValue: string): [BencodedValue, number] {
   }
 
   // Decode bencoded list
-  if (bencodedValue[0] === "l") {
+  else if (bencodedValue[0] === "l") {
     let offset = 1;
     let decodedArr: BencodedValue = [];
 
@@ -63,7 +62,7 @@ function decodeBencode(bencodedValue: string): [BencodedValue, number] {
   }
 
   // Decode bencoded dict
-  if (bencodedValue[0] === "d") {
+  else if (bencodedValue[0] === "d") {
     let offset = 1;
     let decodedDict: DecodedDict = {};
 
@@ -85,9 +84,9 @@ function decodeBencode(bencodedValue: string): [BencodedValue, number] {
     }
 
     return [decodedDict, offset + 1];
+  } else {
+    throw new Error("Unsupported type");
   }
-
-  throw new Error("Unsupported type");
 }
 
 const encodeString = (str: string) => {
@@ -205,6 +204,22 @@ function urlEncodeBinary(buffer: Buffer) {
   return [...buffer].map((b) => `%${b.toString(16).padStart(2, "0")}`).join("");
 }
 
+function getIPAdresses(binaryString: string) {
+  for (let pos = 0; pos < binaryString.length; pos += 6) {
+    const secToLast = Buffer.from(binaryString[pos + 4], "binary")[0].toString(
+      16
+    );
+    const last = Buffer.from(binaryString[pos + 5], "binary")[0].toString(16);
+    const port = parseInt(secToLast + last, 16);
+
+    const ip = [
+      ...Buffer.from(binaryString, "binary").slice(pos, pos + 4),
+    ].join(".");
+
+    console.log(`${ip}:${port}`);
+  }
+}
+
 async function discoverPeers(
   url: string,
   urlEncodedInfoHash: string,
@@ -220,9 +235,20 @@ async function discoverPeers(
   );
   const response = await axios.get(`${url}?info_hash=${urlEncodedInfoHash}`, {
     params: { ...paramsDiscoverPeers },
+    responseType: "arraybuffer",
   });
-  console.log(response);
-  console.log(response.data);
+
+  const bencodedDict = response.data.toString("binary");
+  const [encodedDict, _] = decodeBencode(bencodedDict);
+  const trackerResponse = encodedDict as {
+    interval: number;
+    "min interval": number;
+    peers: string;
+    complete: number;
+    incomplete: number;
+  };
+
+  getIPAdresses(trackerResponse.peers);
 }
 
 const args = process.argv;
