@@ -1,0 +1,14 @@
+{
+  "name": "@codecrafters/bittorrent",
+  "description": "Build your own BitTorrent challenge, from CodeCrafters",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run app/main.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "axios": "^1.7.7"
+  }
+}
