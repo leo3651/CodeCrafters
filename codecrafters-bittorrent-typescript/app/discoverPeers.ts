@@ -1,20 +1,25 @@
 import axios from "axios";
 
 import { decodeBencode } from "./decodeBencode";
-import { generateSha1UniqueId, getParamsDiscoverPeers } from "./utils";
+import {
+  generateSha1UniqueId,
+  generateTorrentInfoHashBuffer,
+  getParamsDiscoverPeers,
+  urlEncodeBinary,
+} from "./utils";
+import type { Torrent } from "./model";
 
-export async function discoverPeers(
-  url: string,
-  urlEncodedInfoHash: string,
-  torrentLen: number
-) {
+export async function discoverPeers(url: string, torrent: Torrent) {
   try {
+    const urlEncodedInfoHash = urlEncodeBinary(
+      generateTorrentInfoHashBuffer(torrent.info)
+    );
     const paramsDiscoverPeers = getParamsDiscoverPeers(
       generateSha1UniqueId(),
       6881,
       0,
       0,
-      torrentLen,
+      torrent.info.length,
       1
     );
     const response = await axios.get(`${url}?info_hash=${urlEncodedInfoHash}`, {
@@ -39,7 +44,7 @@ export async function discoverPeers(
   }
 }
 
-export function getIPAdresses(binaryString: string) {
+function getIPAdresses(binaryString: string) {
   const peers = [];
 
   for (let pos = 0; pos < binaryString.length; pos += 6) {

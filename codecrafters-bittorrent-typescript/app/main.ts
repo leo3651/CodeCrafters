@@ -3,9 +3,8 @@ import {
   generateTorrentInfoHashBuffer,
   getHexHashedPieces,
   parseTorrentObject,
-  urlEncodeBinary,
 } from "./utils";
-import { createTcpConnection } from "./tcpConnection";
+import { createTcpConnection, savePieceToFile } from "./tcpConnection";
 import { discoverPeers } from "./discoverPeers";
 
 const args = process.argv;
@@ -34,6 +33,7 @@ else if (args[2] === "info") {
   );
 
   const torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
+
   console.log(`Info Hash: ${torrentInfoHashBuffer.toString("hex")}`);
   console.log(`Piece Length: ${torrent.info["piece length"]}`);
 
@@ -47,39 +47,26 @@ else if (args[2] === "info") {
 // Arg PEERS
 else if (args[2] === "peers") {
   const torrent = parseTorrentObject(args[3]);
-  const torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
-  const urlEncodedInfoHash = urlEncodeBinary(torrentInfoHashBuffer);
-
-  discoverPeers(torrent.announce, urlEncodedInfoHash, torrent.info.length);
+  discoverPeers(torrent.announce, torrent);
 }
 
 // Arg HANDSHAKE
 else if (args[2] === "handshake") {
+  const peer = args[4];
   const torrentFile = args[3];
   const torrent = parseTorrentObject(torrentFile);
-  const [peerIp, peerPort] = args[4].split(":");
-  createTcpConnection(
-    peerIp,
-    peerPort,
-    generateTorrentInfoHashBuffer(torrent.info)
-  );
+  const [peerIp, peerPort] = peer.split(":");
+  createTcpConnection(peerIp, peerPort, torrent);
 }
 
 // Arg DOWNLOAD_PIECE
-else if ((args[2] = "download_piece")) {
+else if (args[2] === "download_piece") {
   const torrentFile = args[5];
+  const saveToFilePath = args[4];
   const torrent = parseTorrentObject(torrentFile);
-  const torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
-  const urlEncodedInfoHash = urlEncodeBinary(torrentInfoHashBuffer);
 
-  discoverPeers(torrent.announce, urlEncodedInfoHash, torrent.info.length).then(
-    (peers) => {
-      const [peerIp, peerPort] = peers[0].split(":");
-      createTcpConnection(
-        peerIp,
-        peerPort,
-        generateTorrentInfoHashBuffer(torrent.info)
-      );
-    }
-  );
+  discoverPeers(torrent.announce, torrent).then((peers) => {
+    const [peerIp, peerPort] = peers[0].split(":");
+    createTcpConnection(peerIp, peerPort, torrent, saveToFilePath);
+  });
 }

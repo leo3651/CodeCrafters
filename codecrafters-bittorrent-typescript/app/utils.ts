@@ -61,3 +61,10 @@ export function generateTorrentInfoHashBuffer(torrentInfo: TorrentInfo) {
   const encodedInfo = encodeDict(torrentInfo);
   return crypto.createHash("sha1").update(encodedInfo, "binary").digest();
 }
+
+export function generateHexHashFromBuffer(buffer: Buffer) {
+  return crypto
+    .createHash("sha1")
+    .update(buffer.toString("binary"), "binary")
+    .digest("hex");
+}
