@@ -48,11 +48,11 @@ function getIPAdresses(binaryString: string) {
   const peers = [];
 
   for (let pos = 0; pos < binaryString.length; pos += 6) {
-    const secToLast = Buffer.from(binaryString[pos + 4], "binary")[0].toString(
-      16
+    const portBytes = Buffer.from(binaryString, "binary").slice(
+      pos + 4,
+      pos + 6
     );
-    const last = Buffer.from(binaryString[pos + 5], "binary")[0].toString(16);
-    const port = parseInt(secToLast + last, 16);
+    const port = (portBytes[0] << 8) | portBytes[1]; // Combine bytes in big-endian order
 
     const ip = [
       ...Buffer.from(binaryString, "binary").slice(pos, pos + 4),

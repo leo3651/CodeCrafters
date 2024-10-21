@@ -15,7 +15,8 @@ export function createTcpConnection(
   peerIp: string,
   peerPort: string,
   torrent: Torrent,
-  saveToFilePath?: string
+  saveToFilePath: string | null = null,
+  pieceIndexToDownload: number | null = null
 ) {
   const socket = net.createConnection(
     { host: peerIp, port: parseInt(peerPort) },
@@ -36,7 +37,8 @@ export function createTcpConnection(
       socket,
       torrent.info["piece length"],
       torrent,
-      saveToFilePath
+      saveToFilePath,
+      pieceIndexToDownload
     );
   });
 
@@ -73,13 +75,17 @@ function handlePeerMessages(
   socket: net.Socket,
   pieceLen: number,
   torrent: Torrent,
-  saveToFilePath?: string
+  saveToFilePath: string | null,
+  pieceIndexToDownload: number | null
 ) {
-  pieceLen = 245760;
+  const torrentLen = torrent.info.length;
+  const piecesLength = getPiecesLength(
+    torrentLen,
+    torrent.info["piece length"]
+  );
   let pieceIndex = 0;
-  let offset = -13;
+  let offset = 0;
   let collectedPiece = Buffer.alloc(0);
-  const hexHashedPieces = getHexHashedPieces(torrent.info.pieces);
 
   socket.on("data", (data: Buffer) => {
     const messageLen = data.readInt32BE(0);
@@ -88,7 +94,12 @@ function handlePeerMessages(
     // UNCHOKE MESSAGE
     if (messageId === 1) {
       console.log("Received unchoke message");
-      requestPiece(socket, pieceLen, pieceIndex);
+      if (pieceIndexToDownload) {
+        pieceLen = piecesLength[pieceIndexToDownload];
+        requestPiece(socket, pieceLen, pieceIndexToDownload);
+      } else {
+        requestPiece(socket, pieceLen, pieceIndex);
+      }
     }
 
     // BITFIELD MESSAGE
@@ -111,53 +122,39 @@ function handlePeerMessages(
 
       collectedPiece = Buffer.concat([
         new Uint8Array(collectedPiece),
-        new Uint8Array(blockData),
+        new Uint8Array(data),
       ]);
     }
 
     // PIECE DATA
     else {
-      console.log(data);
       offset += data.length;
-
-      if (offset <= BLOCK_SIZE) {
-        collectedPiece = Buffer.concat([
-          new Uint8Array(collectedPiece),
-          new Uint8Array(data),
-        ]);
-      }
-
-      while (offset > BLOCK_SIZE) {
-        const overflow = offset - BLOCK_SIZE;
-        const newBlockIndex = data.length - overflow;
-        const remainingBlockData = data.slice(0, newBlockIndex);
-
-        collectedPiece = Buffer.concat([
-          new Uint8Array(collectedPiece),
-          new Uint8Array(remainingBlockData),
-        ]);
-
-        collectedPiece = Buffer.concat([
-          new Uint8Array(collectedPiece),
-          new Uint8Array(data.slice(newBlockIndex + 13)),
-        ]);
-
-        offset = overflow - 13;
-      }
+      collectedPiece = Buffer.concat([
+        new Uint8Array(collectedPiece),
+        new Uint8Array(data),
+      ]);
     }
 
-    console.log(`Collected ${collectedPiece.length}, PieceLen:${pieceLen}`);
-    if (collectedPiece.length === pieceLen) {
-      console.log(`Collected piece ${pieceIndex}`);
-      console.log(collectedPiece);
+    if (offset === pieceLen + numberOfBlocksRequested(pieceLen) * 13) {
+      const parsedPiece = parsePiece(collectedPiece);
+      offset = 0;
 
-      const downloadedHexHashPiece = generateHexHashFromBuffer(collectedPiece);
-      console.log(downloadedHexHashPiece === hexHashedPieces[0]);
-      console.log(downloadedHexHashPiece);
-      console.log(hexHashedPieces);
+      if (pieceIndex === 0 && saveToFilePath) {
+        savePieceToFile(parsedPiece, saveToFilePath);
+      }
 
-      if (saveToFilePath) {
-        savePieceToFile(collectedPiece, saveToFilePath);
+      console.log(getHexHashedPieces(torrent.info.pieces));
+      console.log(generateHexHashFromBuffer(parsedPiece));
+
+      collectedPiece = Buffer.alloc(0);
+      pieceIndex++;
+      pieceLen = piecesLength[pieceIndex];
+
+      if (pieceIndex < piecesLength.length && pieceIndexToDownload === null) {
+        console.log("REQUEST PIECE");
+        requestPiece(socket, pieceLen, pieceIndex);
+      } else {
+        socket.end();
       }
     }
   });
@@ -205,4 +202,29 @@ export function savePieceToFile(pieceData: Buffer, outputPath: string) {
   } catch (err) {
     console.error(err);
   }
+}
+
+function parsePiece(collectedPiece: Buffer) {
+  let parsedPiece: number[] = [...collectedPiece];
+  for (let i = 0; i < collectedPiece.length; i += BLOCK_SIZE) {
+    console.log(parsedPiece.splice(i, 13));
+  }
+  return Buffer.from(parsedPiece);
+}
+
+function getPiecesLength(totalPiecesLen: number, pieceLen: number) {
+  const numberOfFullLenPieces = Math.trunc(totalPiecesLen / pieceLen);
+  const lastPieceLen = totalPiecesLen % pieceLen;
+
+  const arr = new Array(numberOfFullLenPieces).fill(pieceLen);
+
+  if (lastPieceLen > 0) {
+    arr.push(lastPieceLen);
+  }
+
+  return arr;
+}
+
+function numberOfBlocksRequested(torrentLen: number) {
+  return Math.ceil(torrentLen / BLOCK_SIZE);
 }

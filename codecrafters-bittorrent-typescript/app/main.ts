@@ -63,10 +63,17 @@ else if (args[2] === "handshake") {
 else if (args[2] === "download_piece") {
   const torrentFile = args[5];
   const saveToFilePath = args[4];
+  const pieceIndexToDownload = Number.parseInt(args[6]);
   const torrent = parseTorrentObject(torrentFile);
 
   discoverPeers(torrent.announce, torrent).then((peers) => {
     const [peerIp, peerPort] = peers[0].split(":");
-    createTcpConnection(peerIp, peerPort, torrent, saveToFilePath);
+    createTcpConnection(
+      peerIp,
+      peerPort,
+      torrent,
+      saveToFilePath,
+      pieceIndexToDownload
+    );
   });
 }
