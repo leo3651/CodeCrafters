@@ -1,45 +1,63 @@
 import * as net from "net";
-import fs from "fs";
-import {
-  generateHexHashFromBuffer,
-  generateSha1UniqueId,
-  generateTorrentInfoHashBuffer,
-  getHexHashedPieces,
-} from "./utils";
+import { generateTorrentInfoHashBuffer } from "./utils";
 
 import type { Torrent } from "./model";
+import {
+  createHandshake,
+  getPiecesLength,
+  parsePiece,
+  requestPiece,
+  savePieceToFile,
+  sendHandshake,
+  sendInterested,
+} from "./helperTcpConnection";
 
-const BLOCK_SIZE = 16 * 1024;
+let allCollectedPieces = Buffer.alloc(0);
+let buffer = Buffer.alloc(0);
 
 export function createTcpConnection(
   peerIp: string,
   peerPort: string,
-  torrent: Torrent,
+  torrent: Torrent | null,
   saveToFilePath: string | null = null,
-  pieceIndexToDownload: number | null = null
+  pieceIndexToDownload: number | null = null,
+  magnetHandshake: boolean = false,
+  hexHashedInfoFromMagnetLink: string | null = null
 ) {
+  let torrentInfoHashBuffer: Buffer;
+  if (torrent) {
+    torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
+  } else if (hexHashedInfoFromMagnetLink) {
+    torrentInfoHashBuffer = Buffer.from(hexHashedInfoFromMagnetLink, "hex");
+  }
+
   const socket = net.createConnection(
     { host: peerIp, port: parseInt(peerPort) },
     () => {
-      const handshake = createHandshake(
-        generateTorrentInfoHashBuffer(torrent.info)
-      );
+      const handshake = createHandshake(torrentInfoHashBuffer, magnetHandshake);
       sendHandshake(socket, handshake);
     }
   );
 
-  socket.once("data", (data) => {
+  socket.on("data", (data) => {
     const peerId = data.slice(48, 68);
     console.log(`Peer ID: ${peerId.toString("hex")}`);
 
-    sendInterested(socket);
-    handlePeerMessages(
-      socket,
-      torrent.info["piece length"],
-      torrent,
-      saveToFilePath,
-      pieceIndexToDownload
-    );
+    if (torrent) {
+      sendInterested(socket);
+      handleBitTorrentMessages(
+        data,
+        socket,
+        torrent.info["piece length"],
+        torrent,
+        saveToFilePath,
+        pieceIndexToDownload
+      );
+    } else {
+      if (data[25] === 16) {
+        handleBitTorrentMessages(data, socket);
+      }
+    }
   });
 
   socket.on("error", (err) => {
@@ -47,36 +65,12 @@ export function createTcpConnection(
   });
 }
 
-function createHandshake(torrentInfoHashBuffer: Buffer) {
-  const protocolNameUintArr = new Uint8Array(
-    Buffer.from("BitTorrent protocol")
-  );
-  const protocolLenUintArr = new Uint8Array(
-    Buffer.from([protocolNameUintArr.length])
-  );
-  const peerIdUintArr = new Uint8Array(Buffer.from(generateSha1UniqueId()));
-  const torrentInfoHashBufferUintArr = new Uint8Array(torrentInfoHashBuffer);
-  const reservedUint8 = new Uint8Array(Buffer.alloc(8));
-
-  return Buffer.concat([
-    protocolLenUintArr,
-    protocolNameUintArr,
-    reservedUint8,
-    torrentInfoHashBufferUintArr,
-    peerIdUintArr,
-  ]);
-}
-
-function sendHandshake(socket: net.Socket, handshake: Buffer) {
-  socket.write(new Uint8Array(handshake));
-}
-
-function handlePeerMessages(
+/* function handlePeerMessages(
   socket: net.Socket,
   pieceLen: number,
   torrent: Torrent,
-  saveToFilePath: string | null,
-  pieceIndexToDownload: number | null
+  saveToFilePath: string | null = null,
+  pieceIndexToDownload: number | null = null
 ) {
   const torrentLen = torrent.info.length;
   const piecesLength = getPiecesLength(
@@ -139,92 +133,159 @@ function handlePeerMessages(
       const parsedPiece = parsePiece(collectedPiece);
       offset = 0;
 
-      if (pieceIndex === 0 && saveToFilePath) {
+      if (pieceIndexToDownload !== null && saveToFilePath) {
         savePieceToFile(parsedPiece, saveToFilePath);
       }
-
-      console.log(getHexHashedPieces(torrent.info.pieces));
-      console.log(generateHexHashFromBuffer(parsedPiece));
+      if (pieceIndexToDownload === null && saveToFilePath) {
+        allCollectedPieces = Buffer.concat([
+          new Uint8Array(allCollectedPieces),
+          new Uint8Array(parsedPiece),
+        ]);
+      }
 
       collectedPiece = Buffer.alloc(0);
       pieceIndex++;
       pieceLen = piecesLength[pieceIndex];
 
       if (pieceIndex < piecesLength.length && pieceIndexToDownload === null) {
-        console.log("REQUEST PIECE");
         requestPiece(socket, pieceLen, pieceIndex);
       } else {
+        if (pieceIndexToDownload === null && saveToFilePath) {
+          savePieceToFile(allCollectedPieces, saveToFilePath);
+        }
         socket.end();
       }
     }
   });
-}
+} */
 
-function sendInterested(socket: net.Socket) {
-  const interestedMessage = Buffer.alloc(5);
-  interestedMessage.writeUInt32BE(1, 0);
-  interestedMessage.writeUInt8(2, 4);
-
-  socket.write(new Uint8Array(interestedMessage));
-  console.log("Send interested message");
-}
-
-function requestPiece(
+function handleBitTorrentMessages(
+  data: Buffer,
   socket: net.Socket,
-  pieceLen: number,
-  pieceIndex: number
+  pieceLen: number | null = null,
+  torrent: Torrent | null = null,
+  saveToFilePath: string | null = null,
+  pieceIndexToDownload: number | null = null
 ) {
+  let torrentLen;
+  let piecesLength: number[] = [];
+  let pieceIndex = 0;
   let offset = 0;
+  let collectedPiece = Buffer.alloc(0);
 
-  while (offset < pieceLen) {
-    const blockLen = Math.min(BLOCK_SIZE, pieceLen - offset);
-
-    const requestMessage = Buffer.alloc(17);
-    requestMessage.writeUInt32BE(13, 0);
-    requestMessage.writeUint8(6, 4);
-    requestMessage.writeUInt32BE(pieceIndex, 5);
-    requestMessage.writeUInt32BE(offset, 9);
-    requestMessage.writeUInt32BE(blockLen, 13);
-
-    socket.write(new Uint8Array(requestMessage));
-    console.log(
-      `Requested block for piece index ${pieceIndex} at offset ${offset}`
-    );
-
-    offset += blockLen;
-  }
-}
-
-export function savePieceToFile(pieceData: Buffer, outputPath: string) {
-  try {
-    fs.writeFileSync(outputPath, pieceData.toString("binary"), "binary");
-    console.log("File saved");
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-function parsePiece(collectedPiece: Buffer) {
-  let parsedPiece: number[] = [...collectedPiece];
-  for (let i = 0; i < collectedPiece.length; i += BLOCK_SIZE) {
-    console.log(parsedPiece.splice(i, 13));
-  }
-  return Buffer.from(parsedPiece);
-}
-
-function getPiecesLength(totalPiecesLen: number, pieceLen: number) {
-  const numberOfFullLenPieces = Math.trunc(totalPiecesLen / pieceLen);
-  const lastPieceLen = totalPiecesLen % pieceLen;
-
-  const arr = new Array(numberOfFullLenPieces).fill(pieceLen);
-
-  if (lastPieceLen > 0) {
-    arr.push(lastPieceLen);
+  if (torrent) {
+    torrentLen = torrent.info.length;
+    piecesLength = getPiecesLength(torrentLen, torrent.info["piece length"]);
   }
 
-  return arr;
-}
+  // Append the new data to the buffer
+  buffer = Buffer.concat([new Uint8Array(buffer), new Uint8Array(data)]);
+  console.log(data);
 
-function numberOfBlocksRequested(torrentLen: number) {
-  return Math.ceil(torrentLen / BLOCK_SIZE);
+  if (
+    buffer[0] === 19 &&
+    buffer.slice(1, 20).toString() === "BitTorrent protocol"
+  ) {
+    buffer = Buffer.alloc(0);
+    handleBitTorrentMessages(data.slice(68), socket);
+    return;
+  }
+
+  // Process all complete messages in the buffer
+  while (buffer.length >= 4) {
+    // Read the message length from the first 4 bytes
+    const messageLen = buffer.readInt32BE(0);
+
+    // Check if the buffer contains the complete message
+    if (buffer.length < messageLen + 4) {
+      // If not, wait for more data
+      break;
+    }
+
+    // Extract the complete message
+    const message = buffer.slice(0, messageLen + 4);
+    buffer = buffer.slice(messageLen + 4); // Remove the processed message from the buffer
+
+    // Handle the message
+    if (messageLen === 0) {
+      // Keep-alive message
+      continue;
+    }
+
+    const messageId = message.readUInt8(4);
+
+    // UNCHOKE MESSAGE
+    if (messageId === 1) {
+      console.log("Received unchoke message");
+      if (pieceIndexToDownload !== null) {
+        pieceLen = piecesLength[pieceIndexToDownload];
+        requestPiece(socket, pieceLen, pieceIndexToDownload);
+      } else {
+        if (pieceLen) {
+          requestPiece(socket, pieceLen, pieceIndex);
+        }
+      }
+    }
+
+    // BITFIELD MESSAGE
+    else if (messageId === 5) {
+      console.log("Received bitfield message");
+      // Handle the bitfield message if needed
+    }
+
+    // PIECE MESSAGE
+    else if (messageId === 7) {
+      console.log("Received piece message");
+      const receivedPieceIndex = message.readUInt32BE(5);
+      const blockOffset = message.readUInt32BE(9);
+      const blockData = message.slice(13);
+
+      console.log(
+        `Piece Index: ${receivedPieceIndex}, Block Offset: ${blockOffset}, Block Data Length: ${blockData.length}`
+      );
+
+      collectedPiece = Buffer.concat([
+        new Uint8Array(collectedPiece),
+        new Uint8Array(blockData),
+      ]);
+      offset += blockData.length;
+
+      // Check if the piece is fully downloaded
+      if (offset === pieceLen) {
+        const parsedPiece = parsePiece(collectedPiece);
+        offset = 0;
+        collectedPiece = Buffer.alloc(0);
+
+        if (pieceIndexToDownload !== null && saveToFilePath) {
+          savePieceToFile(parsedPiece, saveToFilePath);
+        }
+        if (pieceIndexToDownload === null && saveToFilePath) {
+          allCollectedPieces = Buffer.concat([
+            new Uint8Array(allCollectedPieces),
+            new Uint8Array(parsedPiece),
+          ]);
+        }
+
+        pieceIndex++;
+        pieceLen = piecesLength[pieceIndex];
+
+        if (pieceIndex < piecesLength.length && pieceIndexToDownload === null) {
+          requestPiece(socket, pieceLen, pieceIndex);
+        } else {
+          if (pieceIndexToDownload === null && saveToFilePath) {
+            savePieceToFile(allCollectedPieces, saveToFilePath);
+          }
+          socket.end();
+        }
+      }
+    } else if (messageId === 20) {
+      console.log(message);
+    }
+
+    // OTHER MESSAGE TYPES
+    else {
+      console.log(`Received message with ID: ${messageId}`);
+      // Handle other message types if needed
+    }
+  }
 }

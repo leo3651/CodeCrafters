@@ -4,8 +4,10 @@ import {
   getHexHashedPieces,
   parseTorrentObject,
 } from "./utils";
-import { createTcpConnection, savePieceToFile } from "./tcpConnection";
+import { createTcpConnection } from "./tcpConnection";
 import { discoverPeers } from "./discoverPeers";
+import { parseMagnetLink } from "./magnetLinks";
+import type { MagnetLink } from "./model";
 
 const args = process.argv;
 
@@ -74,6 +76,43 @@ else if (args[2] === "download_piece") {
       torrent,
       saveToFilePath,
       pieceIndexToDownload
+    );
+  });
+}
+
+// Arg DOWNLOAD
+else if (args[2] === "download") {
+  const torrentFile = args[5];
+  const saveToFilePath = args[4];
+  const torrent = parseTorrentObject(torrentFile);
+
+  discoverPeers(torrent.announce, torrent).then((peers) => {
+    const [peerIp, peerPort] = peers[0].split(":");
+    createTcpConnection(peerIp, peerPort, torrent, saveToFilePath);
+  });
+}
+
+// Arg MAGNET_PARSE
+else if (args[2] === "magnet_parse") {
+  const magnetLink = args[3];
+  console.log(magnetLink);
+  parseMagnetLink(magnetLink);
+}
+
+// Arg MAGNET_HANSHAKE
+else if (args[2] === "magnet_handshake") {
+  const magnetLink = args[3];
+  const magnetLinkObj: MagnetLink = parseMagnetLink(magnetLink);
+  discoverPeers(magnetLinkObj.tr, null, magnetLinkObj.xt).then((peers) => {
+    const [peerIp, peerPort] = peers[0].split(":");
+    createTcpConnection(
+      peerIp,
+      peerPort,
+      null,
+      null,
+      null,
+      true,
+      magnetLinkObj.xt
     );
   });
 }

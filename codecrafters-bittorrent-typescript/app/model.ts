@@ -29,3 +29,10 @@ export interface ParamsDiscoverPeers {
   left: number;
   compact: number;
 }
+
+export interface MagnetLink {
+  [key: string]: string;
+  xt: string;
+  dn: string;
+  tr: string;
+}

@@ -9,19 +9,30 @@ import {
 } from "./utils";
 import type { Torrent } from "./model";
 
-export async function discoverPeers(url: string, torrent: Torrent) {
+export async function discoverPeers(
+  url: string,
+  torrent: Torrent | null,
+  hexHashedInfo: string | null = null
+) {
   try {
-    const urlEncodedInfoHash = urlEncodeBinary(
-      generateTorrentInfoHashBuffer(torrent.info)
-    );
-    const paramsDiscoverPeers = getParamsDiscoverPeers(
+    let urlEncodedInfoHash;
+    let paramsDiscoverPeers = getParamsDiscoverPeers(
       generateSha1UniqueId(),
       6881,
       0,
       0,
-      torrent.info.length,
+      torrent ? torrent.info.length : 999,
       1
     );
+
+    if (torrent) {
+      urlEncodedInfoHash = urlEncodeBinary(
+        generateTorrentInfoHashBuffer(torrent.info)
+      );
+    } else if (hexHashedInfo !== null) {
+      urlEncodedInfoHash = urlEncodeBinary(Buffer.from(hexHashedInfo, "hex"));
+    }
+
     const response = await axios.get(`${url}?info_hash=${urlEncodedInfoHash}`, {
       params: { ...paramsDiscoverPeers },
       responseType: "arraybuffer",

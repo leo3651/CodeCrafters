@@ -4,7 +4,6 @@ export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
   /* This function is used to decode a bencoded string */
 
   // Decode string
-  //console.log(bencodedValue);
   if (!isNaN(parseInt(bencodedValue[0]))) {
     const firstColonIndex = bencodedValue.indexOf(":");
     if (firstColonIndex === -1) {
