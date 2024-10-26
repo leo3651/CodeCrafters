@@ -61,11 +61,13 @@ else if (args[2] === "handshake") {
   createTcpConnection(peerIp, peerPort, torrent);
 }
 
-// Arg DOWNLOAD_PIECE
-else if (args[2] === "download_piece") {
+// Arg DOWNLOAD_PIECE || DOWNLOAD
+else if (args[2] === "download_piece" || args[2] === "download") {
   const torrentFile = args[5];
   const saveToFilePath = args[4];
-  const pieceIndexToDownload = Number.parseInt(args[6]);
+  const pieceIndexToDownload: number | null = isNaN(parseInt(args[6]))
+    ? null
+    : parseInt(args[6]);
   const torrent = parseTorrentObject(torrentFile);
 
   discoverPeers(torrent.announce, torrent).then((peers) => {
@@ -80,26 +82,14 @@ else if (args[2] === "download_piece") {
   });
 }
 
-// Arg DOWNLOAD
-else if (args[2] === "download") {
-  const torrentFile = args[5];
-  const saveToFilePath = args[4];
-  const torrent = parseTorrentObject(torrentFile);
-
-  discoverPeers(torrent.announce, torrent).then((peers) => {
-    const [peerIp, peerPort] = peers[0].split(":");
-    createTcpConnection(peerIp, peerPort, torrent, saveToFilePath);
-  });
-}
-
 // Arg MAGNET_PARSE
 else if (args[2] === "magnet_parse") {
   const magnetLink = args[3];
   parseMagnetLink(magnetLink);
 }
 
-// Arg MAGNET_HANSHAKE
-else if (args[2] === "magnet_handshake") {
+// Arg MAGNET_HANSHAKE || MAGNET_INFO
+else if (args[2] === "magnet_handshake" || args[2] === "magnet_info") {
   const magnetLink = args[3];
   const magnetLinkObj: MagnetLink = parseMagnetLink(magnetLink);
   discoverPeers(magnetLinkObj.tr, null, magnetLinkObj.xt).then((peers) => {
@@ -110,6 +100,30 @@ else if (args[2] === "magnet_handshake") {
       null,
       null,
       null,
+      true,
+      magnetLinkObj.xt
+    );
+  });
+}
+
+// Arg MAGNET_DOWNLOAD_PIECE || MAGNET_DOWNLOAD
+else if (args[2] === "magnet_download_piece" || args[2] === "magnet_download") {
+  console.log(args);
+  const saveToFilePath = args[4];
+  const magnetLink = args[5];
+  const pieceIndexToDownload: number | null = isNaN(parseInt(args[6]))
+    ? null
+    : parseInt(args[6]);
+
+  const magnetLinkObj: MagnetLink = parseMagnetLink(magnetLink);
+  discoverPeers(magnetLinkObj.tr, null, magnetLinkObj.xt).then((peers) => {
+    const [peerIp, peerPort] = peers[0].split(":");
+    createTcpConnection(
+      peerIp,
+      peerPort,
+      null,
+      saveToFilePath,
+      pieceIndexToDownload,
       true,
       magnetLinkObj.xt
     );

@@ -1,7 +1,7 @@
 import type { BencodedValue, DecodedDict } from "./model";
 
 export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
-  /* This function is used to decode a bencoded string */
+  // This function is used to decode a bencoded string
 
   // Decode string
   if (!isNaN(parseInt(bencodedValue[0]))) {

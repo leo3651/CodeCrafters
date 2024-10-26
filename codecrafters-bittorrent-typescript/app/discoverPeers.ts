@@ -11,8 +11,8 @@ import type { Torrent } from "./model";
 
 export async function discoverPeers(
   url: string,
-  torrent: Torrent | null,
-  hexHashedInfo: string | null = null
+  torrent: Torrent | null = null,
+  magnetLinkHexHashedInfo: string | null = null
 ) {
   try {
     let urlEncodedInfoHash;
@@ -29,8 +29,10 @@ export async function discoverPeers(
       urlEncodedInfoHash = urlEncodeBinary(
         generateTorrentInfoHashBuffer(torrent.info)
       );
-    } else if (hexHashedInfo !== null) {
-      urlEncodedInfoHash = urlEncodeBinary(Buffer.from(hexHashedInfo, "hex"));
+    } else if (magnetLinkHexHashedInfo) {
+      urlEncodedInfoHash = urlEncodeBinary(
+        Buffer.from(magnetLinkHexHashedInfo, "hex")
+      );
     }
 
     const response = await axios.get(`${url}?info_hash=${urlEncodedInfoHash}`, {
@@ -63,7 +65,8 @@ function getIPAdresses(binaryString: string) {
       pos + 4,
       pos + 6
     );
-    const port = (portBytes[0] << 8) | portBytes[1]; // Combine bytes in big-endian order
+    // Combine bytes in big-endian order
+    const port = (portBytes[0] << 8) | portBytes[1];
 
     const ip = [
       ...Buffer.from(binaryString, "binary").slice(pos, pos + 4),

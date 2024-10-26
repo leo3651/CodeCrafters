@@ -10,7 +10,7 @@ export function generateSha1UniqueId() {
     .createHash("sha1")
     .update(Date.now().toString())
     .digest("hex");
-  return hash.slice(0, 20); // Take the first 20 characters from the hex string
+  return hash.slice(0, 20);
 }
 
 export function getParamsDiscoverPeers(
@@ -60,11 +60,4 @@ export function getHexHashedPieces(binaryDataString: string): string[] {
 export function generateTorrentInfoHashBuffer(torrentInfo: TorrentInfo) {
   const encodedInfo = encodeDict(torrentInfo);
   return crypto.createHash("sha1").update(encodedInfo, "binary").digest();
-}
-
-export function generateHexHashFromBuffer(buffer: Buffer) {
-  return crypto
-    .createHash("sha1")
-    .update(buffer.toString("binary"), "binary")
-    .digest("hex");
 }

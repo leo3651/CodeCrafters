@@ -1,7 +1,7 @@
 import * as net from "net";
 import { generateTorrentInfoHashBuffer } from "./utils";
 
-import type { DecodedDict, Torrent } from "./model";
+import type { Torrent } from "./model";
 import {
   createHandshake,
   getPiecesLength,
@@ -10,14 +10,20 @@ import {
   sendHandshake,
   sendInterested,
 } from "./helperTcpConnection";
-import { decodeBencode } from "./decodeBencode";
-import { createExtensionHandshake } from "./magnetLinks";
+import {
+  createExtensionHandshake,
+  handleExtensionHandshake,
+  handleExtensionMessage,
+} from "./magnetLinks";
 
 let allCollectedPieces = Buffer.alloc(0);
 let buffer = Buffer.alloc(0);
 let piecesLength: number[] = [];
 let pieceIndex = 0;
 let offset: number = 0;
+let extensionHandshakeReceived: boolean = false;
+let globalPieceIndexToDownload: number | null = null;
+let globalSaveToFilePath: string | null = null;
 
 export function createTcpConnection(
   peerIp: string,
@@ -28,7 +34,10 @@ export function createTcpConnection(
   magnetHandshake: boolean = false,
   hexHashedInfoFromMagnetLink: string | null = null
 ) {
+  globalPieceIndexToDownload = pieceIndexToDownload;
+  globalSaveToFilePath = saveToFilePath;
   let torrentInfoHashBuffer: Buffer;
+
   if (torrent) {
     torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
     piecesLength = getPiecesLength(
@@ -53,9 +62,7 @@ export function createTcpConnection(
         data,
         socket,
         torrent.info["piece length"],
-        torrent,
-        saveToFilePath,
-        pieceIndexToDownload
+        torrent
       );
     } else {
       handleBitTorrentMessages(data, socket);
@@ -71,9 +78,7 @@ function handleBitTorrentMessages(
   data: Buffer,
   socket: net.Socket,
   pieceLen: number | null = null,
-  torrent: Torrent | null = null,
-  saveToFilePath: string | null = null,
-  pieceIndexToDownload: number | null = null
+  torrent: Torrent | null = null
 ) {
   // Append the new data to the buffer
   buffer = Buffer.concat([new Uint8Array(buffer), new Uint8Array(data)]);
@@ -90,14 +95,7 @@ function handleBitTorrentMessages(
     buffer = Buffer.alloc(0);
 
     if (torrent) {
-      handleBitTorrentMessages(
-        data.slice(68),
-        socket,
-        pieceLen,
-        torrent,
-        saveToFilePath,
-        pieceIndexToDownload
-      );
+      handleBitTorrentMessages(data.slice(68), socket, pieceLen, torrent);
     } else {
       handleBitTorrentMessages(data.slice(68), socket);
     }
@@ -129,12 +127,12 @@ function handleBitTorrentMessages(
     // UNCHOKE MESSAGE
     if (messageId === 1) {
       console.log("Received unchoke message");
-      if (pieceIndexToDownload !== null) {
-        pieceLen = piecesLength[pieceIndexToDownload];
-        requestPiece(socket, pieceLen, pieceIndexToDownload);
+      if (globalPieceIndexToDownload !== null) {
+        pieceLen = piecesLength[globalPieceIndexToDownload];
+        requestPiece(socket, pieceLen, globalPieceIndexToDownload);
       } else {
-        if (pieceLen) {
-          requestPiece(socket, pieceLen, pieceIndex);
+        if (piecesLength[pieceIndex]) {
+          requestPiece(socket, piecesLength[pieceIndex], pieceIndex);
         }
       }
     }
@@ -147,7 +145,7 @@ function handleBitTorrentMessages(
       }
     }
 
-    // PIECE MESSAGE
+    // PIECE BLOCK MESSAGE
     else if (messageId === 7) {
       console.log("Received block piece message");
       const blockData = message.slice(13);
@@ -159,26 +157,26 @@ function handleBitTorrentMessages(
       ]);
 
       if (
-        pieceIndexToDownload !== null &&
-        saveToFilePath &&
-        offset === piecesLength[pieceIndexToDownload]
+        globalPieceIndexToDownload !== null &&
+        globalSaveToFilePath &&
+        offset === piecesLength[globalPieceIndexToDownload]
       ) {
-        savePieceToFile(allCollectedPieces, saveToFilePath);
+        savePieceToFile(allCollectedPieces, globalSaveToFilePath);
         socket.end();
         return;
       }
 
       if (offset === piecesLength[pieceIndex]) {
         offset = 0;
-        if (pieceIndexToDownload === null && saveToFilePath) {
+        if (globalPieceIndexToDownload === null && globalSaveToFilePath) {
           pieceIndex++;
           pieceLen = piecesLength[pieceIndex];
 
           if (pieceIndex < piecesLength.length) {
             requestPiece(socket, pieceLen, pieceIndex);
           } else {
-            if (saveToFilePath) {
-              savePieceToFile(allCollectedPieces, saveToFilePath);
+            if (globalSaveToFilePath) {
+              savePieceToFile(allCollectedPieces, globalSaveToFilePath);
             }
             socket.end();
           }
@@ -188,31 +186,24 @@ function handleBitTorrentMessages(
 
     // EXTENSION HANDSHAKE
     else if (messageId === 20) {
-      console.log("Received extension handshake message");
-      const [encodeDict, _] = decodeBencode(
-        message.slice(6).toString("binary")
-      );
-      const extensionHandshake = encodeDict as {
-        m: {
-          ut_metadata: 1;
-          ut_pex: 2;
-        };
-        metadata_size: 132;
-        reqq: 250;
-        v: "Rain 0.0.0";
-        yourip: "¼N¿";
-      };
+      console.log("Received extension message");
+      if (!extensionHandshakeReceived) {
+        handleExtensionHandshake(message, socket);
+        extensionHandshakeReceived = true;
+      } else {
+        const torrentInfo = handleExtensionMessage(message, socket);
+        piecesLength = getPiecesLength(
+          torrentInfo.length,
+          torrentInfo["piece length"]
+        );
 
-      console.log(
-        `Peer Metadata Extension ID: ${extensionHandshake.m.ut_metadata}`
-      );
-
-      socket.end();
-    }
-
-    // OTHER MESSAGE TYPES
-    else {
-      console.log(`Received message with ID: ${messageId}`);
+        if (
+          process.argv[2] === "magnet_download_piece" ||
+          process.argv[2] === "magnet_download"
+        ) {
+          sendInterested(socket);
+        }
+      }
     }
   }
 }
