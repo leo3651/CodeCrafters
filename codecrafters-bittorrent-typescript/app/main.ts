@@ -95,7 +95,6 @@ else if (args[2] === "download") {
 // Arg MAGNET_PARSE
 else if (args[2] === "magnet_parse") {
   const magnetLink = args[3];
-  console.log(magnetLink);
   parseMagnetLink(magnetLink);
 }
 

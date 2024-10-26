@@ -35,6 +35,7 @@ export function createExtensionHandshake() {
   const messageId = Buffer.from([20]);
   const extensionMessageId = Buffer.alloc(1);
   extensionMessageId.writeUInt8(0, 0);
+
   const dictionary = {
     m: {
       ut_metadata: 16,
@@ -42,8 +43,6 @@ export function createExtensionHandshake() {
     },
   };
   const bencodedDict = encodeDict(dictionary);
-  console.log(bencodedDict);
-  console.log(decodeBencode(bencodedDict)[0]);
 
   const payload = Buffer.concat([
     new Uint8Array(extensionMessageId),

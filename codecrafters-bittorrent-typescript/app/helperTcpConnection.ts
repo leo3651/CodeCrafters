@@ -17,13 +17,9 @@ export function createHandshake(
   );
   const peerIdUintArr = new Uint8Array(Buffer.from(generateSha1UniqueId()));
   const torrentInfoHashBufferUintArr = new Uint8Array(torrentInfoHashBuffer);
-  let reservedUint8;
-  if (magnetLink) {
-    reservedUint8 = new Uint8Array(Buffer.from([0, 0, 0, 0, 0, 16, 0, 0]));
-  } else {
-    reservedUint8 = new Uint8Array(Buffer.alloc(8));
-  }
-  console.log(reservedUint8);
+  const reservedUint8 = new Uint8Array(
+    Buffer.from([0, 0, 0, 0, 0, magnetLink ? 16 : 0, 0, 0])
+  );
 
   return Buffer.concat([
     protocolLenUintArr,
@@ -82,14 +78,6 @@ export function savePieceToFile(pieceData: Buffer, outputPath: string) {
   }
 }
 
-export function parsePiece(collectedPiece: Buffer) {
-  let parsedPiece: number[] = [...collectedPiece];
-  for (let i = 0; i < collectedPiece.length; i += BLOCK_SIZE) {
-    parsedPiece.splice(i, 13);
-  }
-  return Buffer.from(parsedPiece);
-}
-
 export function getPiecesLength(totalPiecesLen: number, pieceLen: number) {
   const numberOfFullLenPieces = Math.trunc(totalPiecesLen / pieceLen);
   const lastPieceLen = totalPiecesLen % pieceLen;
@@ -102,7 +90,3 @@ export function getPiecesLength(totalPiecesLen: number, pieceLen: number) {
 
   return arr;
 }
-
-// export function numberOfBlocksRequested(torrentLen: number) {
-//   return Math.ceil(torrentLen / BLOCK_SIZE);
-// }
