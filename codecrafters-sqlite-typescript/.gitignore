@@ -1,0 +1,4 @@
+# Database files used for testing
+*.db
+
+node_modules/
