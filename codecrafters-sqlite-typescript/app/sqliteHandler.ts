@@ -95,7 +95,7 @@ export class SQLiteHandler {
     return cellPointerArr;
   }
 
-  public parseTableCell(buffer: Buffer): SQLiteSchemaCell {
+  public parseCell(buffer: Buffer): SQLiteSchemaCell {
     let offset = 0;
 
     const { result: sizeOfTheRecord, nextByteToRead: sizeOfTheRecordOffset } =
@@ -175,11 +175,14 @@ export class SQLiteHandler {
 
   public async getTableName() {
     const tableNames: string[] = [];
-    const buffer = Buffer.from(await this.getDBFileBufferAtOffset(4096, 0));
+    const { "database page size": dbPageSize } = await this.parseDBHeader();
+    const buffer = Buffer.from(
+      await this.getDBFileBufferAtOffset(dbPageSize, 0)
+    );
     const cellPointerArr = await this.getCellPointerArray();
     cellPointerArr.forEach((cellPointer) =>
       tableNames.push(
-        this.parseTableCell(buffer.slice(cellPointer)).valueOfSqlSchemaTableName
+        this.parseCell(buffer.slice(cellPointer)).valueOfSqlSchemaTableName
       )
     );
     console.log(...tableNames);

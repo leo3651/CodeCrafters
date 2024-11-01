@@ -6,6 +6,7 @@ const command: string = args[3];
 
 const sqliteHandler = new SQLiteHandler(databaseFilePath);
 
+// .dbinfo ARG
 if (command === ".dbinfo") {
   console.log("\nDATABASE HEADER");
   Object.entries(await sqliteHandler.parseDBHeader()).forEach(
@@ -22,7 +23,7 @@ if (command === ".dbinfo") {
   );
 }
 
-//
+// .tables ARG
 else if (command === ".tables") {
   await sqliteHandler.getTableName();
 }
