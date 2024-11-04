@@ -13,5 +13,5 @@ export function readVariant(buffer: Buffer) {
     i++;
   }
 
-  return { result, nextByteToRead: i + 1 };
+  return { result, bytesRead: i + 1 };
 }

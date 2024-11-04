@@ -25,9 +25,10 @@ export interface SQLiteHeader {
 }
 
 export interface BTreePageHeader {
+  "number of tables": number;
   "b-tree page type": number; // One-byte flag at offset 0 indicating the b-tree page type.
   "start of first freeblock": number; // Two-byte integer at offset 1 indicating the start of the first freeblock on the page, or zero if none.
-  "number of tables": number; // Two-byte integer at offset 3 representing the number of cells on the page.
+  "number of cells": number; // Two-byte integer at offset 3 representing the number of cells on the page.
   "start of cell content area": number; // Two-byte integer at offset 5 designating the start of the cell content area, with zero interpreted as 65536.
   "number of fragmented free bytes": number; // One-byte integer at offset 7 representing the number of fragmented free bytes within the cell content area.
   //"right-most pointer": number | null; // Four-byte page number at offset 8, applicable only to interior b-tree pages.
@@ -45,4 +46,16 @@ export interface SQLiteSchemaCell {
   valueOfSqlSchemaType: string; // Value of the 'type' field (e.g., "table")
   valueOfSqlSchemaName: string; // Value of the 'name' field (table name)
   valueOfSqlSchemaTableName: string; // Value of the 'tbl_name' field (table name)
+  sqlStatement: string;
 }
+
+export const cellKeys = [
+  "sizeOfTheRecord",
+  "rowId",
+  "sizeOfTheRecordHeader",
+  "sizeOfSqliteSchemaType",
+  "sizeOfSqliteSchemaName",
+  "sizeOfSqliteSchemaTableName",
+  "sqliteRootPage",
+  "sizeOfSqliteSchema",
+];
