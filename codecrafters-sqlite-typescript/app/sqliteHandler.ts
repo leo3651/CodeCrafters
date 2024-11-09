@@ -7,16 +7,20 @@ import {
 } from "./models";
 import { getSerialTypeSize, parseSerialTypeValue, readVariant } from "./utils";
 
-export const DB_HEADER_SIZE = 100; // BYTES
-export const CELL_POINTER_SIZE = 2; // BYTES
+const DB_HEADER_SIZE = 100; // BYTES
+const CELL_POINTER_SIZE = 2; // BYTES
+const TABLE_LEAF = 0x0d; // 13
+const TABLE_INTERIOR = 0x05; // 5
+const INDEX_LEAF = 0x0a; // 10
+const INDEX_INTERIOR = 0x02; // 2
 
 export class SQLiteHandler {
   private readonly dbPath: string;
-  dbHeader!: DbFileHeader;
-  rootPageHeader!: BTreePageHeader;
-  rootCellPointersArr!: number[];
-  rootPageBuffer!: Buffer;
-  data: string[][] = [];
+  public dbHeader!: DbFileHeader;
+  public rootPageHeader!: BTreePageHeader;
+  private rootCellPointersArr!: number[];
+  private rootPageBuffer!: Buffer;
+  private data: string[][] = [];
   private readyPromise!: Promise<void>;
 
   constructor(dbPath: string) {
@@ -245,7 +249,7 @@ export class SQLiteHandler {
     return this.data;
   }
 
-  private async traverseBTreePage(pageIndex: number) {
+  private async traverseBTreePage(pageIndex: number): Promise<void> {
     const pageHeaderObj = await this.parsePageHeader(
       pageIndex * this.dbHeader["database page size"]
     );
@@ -259,29 +263,36 @@ export class SQLiteHandler {
       pageIndex * this.dbHeader["database page size"]
     );
 
-    if (
-      pageHeaderObj["b-tree page type"] === 0x05 ||
-      pageHeaderObj["b-tree page type"] === 0x02
-    ) {
+    // TABLE INTERIOR
+    if (pageHeaderObj["b-tree page type"] === TABLE_INTERIOR) {
       for (const cellPointer of cellPointers) {
-        const nextPageIndex = pageBuffer
-          .slice(cellPointer, cellPointer + 4)
-          .readUInt32BE(0);
+        const nextPageIndex =
+          pageBuffer.slice(cellPointer, cellPointer + 4).readUInt32BE(0) - 1;
         await this.traverseBTreePage(nextPageIndex);
       }
-    } else if (
-      pageHeaderObj["b-tree page type"] === 0x0d ||
-      pageHeaderObj["b-tree page type"] === 0x0a
-    ) {
+    }
+
+    // TABLE LEAF
+    else if (pageHeaderObj["b-tree page type"] === TABLE_LEAF) {
       cellPointers.forEach((cellPointer) => {
-        this.data.push(
-          this.parseCell(
-            pageBuffer.slice(cellPointer),
-            pageHeaderObj["b-tree page type"]
-          )
+        const cellData = this.parseCell(
+          pageBuffer.slice(cellPointer),
+          pageHeaderObj["b-tree page type"]
         );
+        this.data.push(cellData);
       });
-    } else {
+    }
+
+    // INDEX LEAF
+    else if (pageHeaderObj["b-tree page type"] === INDEX_LEAF) {
+    }
+
+    // INDEX INTERIOR
+    else if (pageHeaderObj["b-tree page type"] === INDEX_INTERIOR) {
+    }
+
+    // Unsupported type
+    else {
       throw new Error("Unsupported page type");
     }
   }
@@ -289,7 +300,8 @@ export class SQLiteHandler {
   private parseCell(buffer: Buffer, pageType: number): string[] {
     let offset = 0;
 
-    if (pageType === 0x0d || pageType === 0x0a) {
+    // TABLE LEAF
+    if (pageType === TABLE_LEAF) {
       // Step 1: Read payload size (varint)
       const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
         buffer.slice(offset)
@@ -336,12 +348,24 @@ export class SQLiteHandler {
       //console.log(data);
       return data;
     }
-    if (pageType === 0x05) {
+
+    // TABLE INTERIOR
+    else if (pageType === TABLE_INTERIOR) {
       const pageNumberOfLeftChild = buffer.readInt32BE(0);
       const { result: rowId, bytesRead: rowIdBytes } = readVariant(
         buffer.slice(offset)
       );
     }
+
+    // INDEX LEAF
+    else if (pageType === INDEX_LEAF) {
+    }
+
+    // INDEX INTERIOR
+    else if (pageType === INDEX_INTERIOR) {
+    }
+
+    // Unsupported type
     throw new Error("Unsupported cell type");
   }
 }
