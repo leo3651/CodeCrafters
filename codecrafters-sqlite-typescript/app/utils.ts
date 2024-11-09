@@ -17,7 +17,7 @@ export function readVariant(buffer: Buffer) {
 }
 
 /**
- * Parses the value size of the buffer.
+ * Parses the value of the buffer.
  */
 export function parseSerialTypeValue(
   buffer: Buffer,

@@ -1,5 +1,4 @@
 import { SQLiteHandler } from "./sqliteHandler";
-import fs from "fs";
 
 const args = process.argv;
 const databaseFilePath: string = args[2];

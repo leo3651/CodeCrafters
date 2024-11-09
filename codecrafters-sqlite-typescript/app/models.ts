@@ -9,8 +9,8 @@ export interface DbFileHeader {
   "leaf payload fraction": number; // Must be 32.
   "file change counter": number; // File change counter.
   "number of pages": number; // Size of the database file in pages.
-  "first freelist trunk page": number; // Page number of the first freelist trunk page.
-  "total freelist pages": number; // Total number of freelist pages.
+  "first freeList trunk page": number; // Page number of the first freeList trunk page.
+  "total freeList pages": number; // Total number of freeList pages.
   "schema cookie": number; // The schema cookie.
   "schema format number": number; // Supported schema formats are 1, 2, 3, and 4.
   "default page cache size": number; // Default page cache size.
@@ -27,7 +27,7 @@ export interface DbFileHeader {
 export interface BTreePageHeader {
   "number of tables": number;
   "b-tree page type": number; // One-byte flag at offset 0 indicating the b-tree page type.
-  "start of first freeblock": number; // Two-byte integer at offset 1 indicating the start of the first freeblock on the page, or zero if none.
+  "start of first freeBlock": number; // Two-byte integer at offset 1 indicating the start of the first freeBlock on the page, or zero if none.
   "number of cells": number; // Two-byte integer at offset 3 representing the number of cells on the page.
   "start of cell content area": number; // Two-byte integer at offset 5 designating the start of the cell content area, with zero interpreted as 65536.
   "number of fragmented free bytes": number; // One-byte integer at offset 7 representing the number of fragmented free bytes within the cell content area.

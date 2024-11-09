@@ -75,8 +75,8 @@ export class SQLiteHandler {
       "leaf payload fraction": headerDataView.getUint8(23),
       "file change counter": headerDataView.getUint32(24),
       "number of pages": headerDataView.getUint32(28),
-      "first freelist trunk page": headerDataView.getUint32(32),
-      "total freelist pages": headerDataView.getUint32(36),
+      "first freeList trunk page": headerDataView.getUint32(32),
+      "total freeList pages": headerDataView.getUint32(36),
       "schema cookie": headerDataView.getUint32(40),
       "schema format number": headerDataView.getUint32(44),
       "default page cache size": headerDataView.getUint32(48),
@@ -114,7 +114,7 @@ export class SQLiteHandler {
 
     return {
       "b-tree page type": pageHeaderDataView.getUint8(0),
-      "start of first freeblock": pageHeaderDataView.getUint16(1),
+      "start of first freeBlock": pageHeaderDataView.getUint16(1),
       "number of cells": pageHeaderDataView.getUint16(3),
       "number of tables": pageHeaderDataView.getUint16(3),
       "start of cell content area": pageHeaderDataView.getUint16(5),
