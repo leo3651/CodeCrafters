@@ -1,4 +1,4 @@
-export interface SQLiteHeader {
+export interface DbFileHeader {
   "header string": string; // The header string: "SQLite format 3\000"
   "database page size": number; // The database page size in bytes.
   "file format write version": number; // 1 for legacy; 2 for WAL.
@@ -34,28 +34,10 @@ export interface BTreePageHeader {
   //"right-most pointer": number | null; // Four-byte page number at offset 8, applicable only to interior b-tree pages.
 }
 
-export interface SQLiteSchemaCell {
-  sizeOfTheRecord: number; // Size of the entire record in bytes
-  rowId: number; // Row ID of the record
-  sizeOfTheRecordHeader: number; // Size of the record header
-  sizeOfSqliteSchemaType: number; // Size of the 'type' field in bytes
-  sizeOfSqliteSchemaName: number; // Size of the 'name' field in bytes
-  sizeOfSqliteSchemaTableName: number; // Size of the 'tbl_name' field in bytes
-  sqliteRootPage: number; // Root page number for the table
-  sizeOfSqliteSchema: number; // Size of the 'sql' field in bytes
-  valueOfSqlSchemaType: string; // Value of the 'type' field (e.g., "table")
-  valueOfSqlSchemaName: string; // Value of the 'name' field (table name)
-  valueOfSqlSchemaTableName: string; // Value of the 'tbl_name' field (table name)
-  sqlStatement: string;
+export enum RootPageCellData {
+  schemaType,
+  schemaName,
+  schemaTableName,
+  schemaRootPage,
+  schema,
 }
-
-export const cellKeys = [
-  "sizeOfTheRecord",
-  "rowId",
-  "sizeOfTheRecordHeader",
-  "sizeOfSqliteSchemaType",
-  "sizeOfSqliteSchemaName",
-  "sizeOfSqliteSchemaTableName",
-  "sqliteRootPage",
-  "sizeOfSqliteSchema",
-];

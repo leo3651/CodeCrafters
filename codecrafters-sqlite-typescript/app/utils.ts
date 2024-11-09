@@ -15,3 +15,57 @@ export function readVariant(buffer: Buffer) {
 
   return { result, bytesRead: i + 1 };
 }
+
+/**
+ * Parses the value size of the buffer.
+ */
+export function parseSerialTypeValue(
+  buffer: Buffer,
+  targetSerialType: number,
+  id: number
+): string {
+  // Parse value based on serial type
+  if (targetSerialType >= 13 && targetSerialType % 2 === 1) {
+    // Text
+    return buffer.toString("utf-8");
+  } else if (targetSerialType >= 12 && targetSerialType % 2 === 0) {
+    // BLOB
+    return buffer.toString("hex");
+  } else if (targetSerialType === 1) {
+    return buffer.readInt8(0).toString();
+  } else if (targetSerialType === 2) {
+    return buffer.readInt16BE(0).toString();
+  } else if (targetSerialType === 3) {
+    return buffer.readIntBE(0, 3).toString();
+  } else if (targetSerialType === 4) {
+    return buffer.readInt32BE(0).toString();
+  } else if (targetSerialType === 5) {
+    return buffer.readIntBE(0, 6).toString();
+  } else if (targetSerialType === 6) {
+    return buffer.readBigInt64BE(0).toString();
+  } else if (targetSerialType === 7) {
+    return buffer.readDoubleBE(0).toString();
+  } else if (targetSerialType === 8 || targetSerialType === 9) {
+    return "0";
+  } else {
+    return `${id}`;
+  }
+}
+
+/**
+ * Determines the byte size of a column based on its serial type.
+ */
+export function getSerialTypeSize(serialType: number): number {
+  if (serialType === 0) return 0; // NULL
+  if (serialType === 1) return 1; // 8-bit integer
+  if (serialType === 2) return 2; // 16-bit integer
+  if (serialType === 3) return 3; // 24-bit integer
+  if (serialType === 4) return 4; // 32-bit integer
+  if (serialType === 5) return 6; // 48-bit integer
+  if (serialType === 6) return 8; // 64-bit integer
+  if (serialType === 7) return 8; // 64-bit float
+  if (serialType === 8 || serialType === 9) return 0; // Reserved integers 0 or 1
+  if (serialType >= 12 && serialType % 2 === 0) return (serialType - 12) / 2; // BLOB
+  if (serialType >= 13 && serialType % 2 === 1) return (serialType - 13) / 2; // Text
+  return 0;
+}
