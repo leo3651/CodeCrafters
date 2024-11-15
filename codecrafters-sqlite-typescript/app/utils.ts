@@ -69,3 +69,79 @@ export function getSerialTypeSize(serialType: number): number {
   if (serialType >= 13 && serialType % 2 === 1) return (serialType - 13) / 2; // Text
   return 0;
 }
+
+function binarySearchFirst(
+  cellPointerArr: number[],
+  buffer: Buffer,
+  target: string,
+  parseCellMethod: (buffer: Buffer) => { indexedValue: string; id: string }
+): number {
+  let left = 0;
+  let right = cellPointerArr.length - 1;
+  let firstIndex = -1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+
+    if (
+      parseCellMethod(buffer.slice(cellPointerArr[mid])).indexedValue === target
+    ) {
+      firstIndex = mid;
+      right = mid - 1; // Continue to search in the left half
+    } else if (
+      parseCellMethod(buffer.slice(cellPointerArr[mid])).indexedValue < target
+    ) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  return firstIndex;
+}
+
+function binarySearchLast(
+  cellPointerArr: number[],
+  buffer: Buffer,
+  target: string,
+  parseCellMethod: (buffer: Buffer) => { indexedValue: string; id: string }
+): number {
+  let left = 0;
+  let right = cellPointerArr.length - 1;
+  let lastIndex = -1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+
+    if (
+      parseCellMethod(buffer.slice(cellPointerArr[mid])).indexedValue === target
+    ) {
+      lastIndex = mid;
+      left = mid + 1; // Continue to search in the right half
+    } else if (
+      parseCellMethod(buffer.slice(cellPointerArr[mid])).indexedValue < target
+    ) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  return lastIndex;
+}
+
+export function findAllOccurrencesWithBinarySearch(
+  arr: number[],
+  buffer: Buffer,
+  target: string,
+  parseCellMethod: (buffer: Buffer) => { indexedValue: string; id: string }
+): number[] {
+  const firstIndex = binarySearchFirst(arr, buffer, target, parseCellMethod);
+
+  if (firstIndex === -1) {
+    return []; // Target not found
+  }
+
+  const lastIndex = binarySearchLast(arr, buffer, target, parseCellMethod);
+  return arr.slice(firstIndex, lastIndex + 1);
+}

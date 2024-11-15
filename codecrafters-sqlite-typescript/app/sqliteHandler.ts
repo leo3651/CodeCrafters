@@ -5,7 +5,12 @@ import {
   type BTreePageHeader,
   type DbFileHeader,
 } from "./models";
-import { getSerialTypeSize, parseSerialTypeValue, readVariant } from "./utils";
+import {
+  findAllOccurrencesWithBinarySearch,
+  getSerialTypeSize,
+  parseSerialTypeValue,
+  readVariant,
+} from "./utils";
 
 const DB_HEADER_SIZE = 100; // BYTES
 const CELL_POINTER_SIZE = 2; // BYTES
@@ -22,6 +27,8 @@ export class SQLiteHandler {
   private rootPageBuffer!: Buffer;
   private data: string[][] = [];
   private readyPromise!: Promise<void>;
+  private found: any[] = [];
+  private isFound: boolean = false;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -98,7 +105,7 @@ export class SQLiteHandler {
   private async parsePageHeader(
     offset: number
   ): Promise<BTreePageHeader & { BTreePageHeaderSize: number }> {
-    let BTreePageHeaderSize = 8;
+    let BTreePageHeaderSize = 12;
     const pageHeaderBuffer = await this.getDBFileBufferAtOffset(
       BTreePageHeaderSize,
       offset
@@ -110,10 +117,10 @@ export class SQLiteHandler {
     );
 
     if (
-      pageHeaderDataView.getUint8(0) === 0x05 ||
-      pageHeaderDataView.getUint8(0) === 0x02
+      pageHeaderDataView.getUint8(0) === TABLE_LEAF ||
+      pageHeaderDataView.getUint8(0) === INDEX_LEAF
     ) {
-      BTreePageHeaderSize = 12;
+      BTreePageHeaderSize = 8;
     }
 
     return {
@@ -123,6 +130,8 @@ export class SQLiteHandler {
       "number of tables": pageHeaderDataView.getUint16(3),
       "start of cell content area": pageHeaderDataView.getUint16(5),
       "number of fragmented free bytes": pageHeaderDataView.getUint8(7),
+      "right most pointer":
+        BTreePageHeaderSize === 12 ? pageHeaderDataView.getUint32(8) - 1 : null,
       BTreePageHeaderSize,
     };
   }
@@ -159,10 +168,9 @@ export class SQLiteHandler {
 
     this.rootCellPointersArr.forEach((cellPointer) =>
       tableNames.push(
-        this.parseCell(
-          this.rootPageBuffer.slice(cellPointer),
-          this.rootPageHeader["b-tree page type"]
-        )[RootPageCellData.schemaTableName]
+        this.parseTableLeafCell(this.rootPageBuffer.slice(cellPointer))[
+          RootPageCellData.schemaTableName
+        ]
       )
     );
 
@@ -190,9 +198,8 @@ export class SQLiteHandler {
 
   private matchedTableRootData(tableName: string): string[] | null {
     for (const cellPointer of this.rootCellPointersArr) {
-      const cellData = this.parseCell(
-        this.rootPageBuffer.slice(cellPointer),
-        this.rootPageHeader["b-tree page type"]
+      const cellData = this.parseTableLeafCell(
+        this.rootPageBuffer.slice(cellPointer)
       );
 
       if (cellData[RootPageCellData.schemaTableName] === tableName.trim()) {
@@ -245,11 +252,15 @@ export class SQLiteHandler {
       throw new Error(`Table ${tableName} not found`);
     }
 
-    await this.traverseBTreePage(tablePageIndex);
+    await this.traverseBTreePage(3, "bosnia and herzegovina");
+
     return this.data;
   }
 
-  private async traverseBTreePage(pageIndex: number): Promise<void> {
+  private async traverseBTreePage(
+    pageIndex: number,
+    searchValue?: string
+  ): Promise<void> {
     const pageHeaderObj = await this.parsePageHeader(
       pageIndex * this.dbHeader["database page size"]
     );
@@ -266,29 +277,93 @@ export class SQLiteHandler {
     // TABLE INTERIOR
     if (pageHeaderObj["b-tree page type"] === TABLE_INTERIOR) {
       for (const cellPointer of cellPointers) {
-        const nextPageIndex =
-          pageBuffer.slice(cellPointer, cellPointer + 4).readUInt32BE(0) - 1;
+        const nextPageIndex = this.parseTableInteriorCell(
+          pageBuffer.slice(cellPointer)
+        ).leftChildPageNumber;
+
+        this.parseTableInteriorCell(pageBuffer.slice(cellPointer));
         await this.traverseBTreePage(nextPageIndex);
+      }
+
+      if (pageHeaderObj["right most pointer"]) {
+        await this.traverseBTreePage(pageHeaderObj["right most pointer"]);
       }
     }
 
     // TABLE LEAF
     else if (pageHeaderObj["b-tree page type"] === TABLE_LEAF) {
       cellPointers.forEach((cellPointer) => {
-        const cellData = this.parseCell(
-          pageBuffer.slice(cellPointer),
-          pageHeaderObj["b-tree page type"]
-        );
+        const cellData = this.parseTableLeafCell(pageBuffer.slice(cellPointer));
         this.data.push(cellData);
       });
     }
 
     // INDEX LEAF
     else if (pageHeaderObj["b-tree page type"] === INDEX_LEAF) {
+      if (searchValue) {
+        findAllOccurrencesWithBinarySearch(
+          cellPointers,
+          pageBuffer,
+          searchValue,
+          this.parseIndexLeafCell.bind(this)
+        ).forEach((cellPointer) => {
+          this.found.push(
+            this.parseIndexLeafCell(pageBuffer.slice(cellPointer))
+          );
+        });
+      }
     }
 
     // INDEX INTERIOR
     else if (pageHeaderObj["b-tree page type"] === INDEX_INTERIOR) {
+      console.log("CELLS ON PAGE");
+      cellPointers.forEach((cellPointer) => {
+        console.log(this.parseIndexInteriorCell(pageBuffer.slice(cellPointer)));
+      });
+
+      if (searchValue) {
+        const found = findAllOccurrencesWithBinarySearch(
+          cellPointers,
+          pageBuffer,
+          searchValue,
+          this.parseIndexInteriorCell.bind(this)
+        );
+        if (found.length > 0) {
+          let pi = -999;
+          for (const cellPointer of found) {
+            pi = this.parseIndexInteriorCell(
+              pageBuffer.slice(cellPointer)
+            ).leftChildPageNumber;
+            await this.traverseBTreePage(pi, searchValue);
+          }
+          await this.traverseBTreePage(pi + 1, searchValue);
+          console.log("FOUNDED", this.found);
+
+          return;
+        }
+      }
+
+      const leftChildPageNumber = this.parseIndexInteriorCell(
+        pageBuffer.slice(cellPointers[cellPointers.length - 1])
+      ).leftChildPageNumber;
+      const lastCell = this.parseIndexInteriorCell(
+        pageBuffer.slice(cellPointers[cellPointers.length - 1])
+      );
+
+      if (
+        searchValue &&
+        searchValue >= lastCell.indexedValue &&
+        pageHeaderObj["right most pointer"]
+      ) {
+        console.log("RIGHT", pageHeaderObj["right most pointer"]);
+        await this.traverseBTreePage(
+          pageHeaderObj["right most pointer"],
+          searchValue
+        );
+      } else {
+        console.log("LEFT", leftChildPageNumber);
+        await this.traverseBTreePage(leftChildPageNumber, searchValue);
+      }
     }
 
     // Unsupported type
@@ -297,75 +372,93 @@ export class SQLiteHandler {
     }
   }
 
-  private parseCell(buffer: Buffer, pageType: number): string[] {
+  private parseTableLeafCell(buffer: Buffer) {
     let offset = 0;
+    // Step 1: Read payload size (varint)
+    const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
+      buffer.slice(offset)
+    );
+    offset += payloadSizeBytes;
 
-    // TABLE LEAF
-    if (pageType === TABLE_LEAF) {
-      // Step 1: Read payload size (varint)
-      const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
+    // Step 2: Read row ID (varint)
+    const { result: rowId, bytesRead: rowIdBytes } = readVariant(
+      buffer.slice(offset)
+    );
+    offset += rowIdBytes;
+
+    return this.parseCellPayload(buffer, offset, rowId);
+  }
+
+  private parseTableInteriorCell(buffer: Buffer) {
+    let offset = 4;
+    const leftChildPageNumber = buffer.readInt32BE(0) - 1;
+    const { result: rowId, bytesRead: rowIdBytes } = readVariant(
+      buffer.slice(offset)
+    );
+
+    return { leftChildPageNumber, rowId };
+  }
+
+  private parseIndexLeafCell(buffer: Buffer) {
+    let offset = 0;
+    const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
+      buffer.slice(offset)
+    );
+    offset += payloadSizeBytes;
+
+    const [indexedValue, id] = this.parseCellPayload(buffer, offset);
+    return { indexedValue, id };
+  }
+
+  private parseIndexInteriorCell(buffer: Buffer) {
+    let offset = 4;
+    const leftChildPageNumber = buffer.readInt32BE(0) - 1;
+    const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
+      buffer.slice(offset)
+    );
+    offset += payloadSizeBytes;
+
+    const [indexedValue, id] = this.parseCellPayload(buffer, offset);
+    return { leftChildPageNumber, indexedValue, id };
+  }
+
+  private parseCellPayload(
+    buffer: Buffer,
+    offset: number,
+    rowId: number = -999
+  ): string[] {
+    // Read header size (varint)
+    const { result: headerSize, bytesRead: headerSizeBytes } = readVariant(
+      buffer.slice(offset)
+    );
+    offset += headerSizeBytes;
+
+    // Parse serial types in the header
+    const serialTypes: number[] = [];
+    let headerRemainingBytes = headerSize - headerSizeBytes;
+    while (headerRemainingBytes > 0) {
+      const { result: serialType, bytesRead: serialTypeBytes } = readVariant(
         buffer.slice(offset)
       );
-      offset += payloadSizeBytes;
+      serialTypes.push(serialType);
+      offset += serialTypeBytes;
+      headerRemainingBytes -= serialTypeBytes;
+    }
 
-      // Step 2: Read row ID (varint)
-      const { result: rowId, bytesRead: rowIdBytes } = readVariant(
-        buffer.slice(offset)
+    // Parse data
+    const data = [];
+    for (let i = 0; i < serialTypes.length; i++) {
+      const columnSize = getSerialTypeSize(serialTypes[i]);
+      data.push(
+        parseSerialTypeValue(
+          buffer.slice(offset, offset + columnSize),
+          serialTypes[i],
+          rowId
+        )
       );
-      offset += rowIdBytes;
-
-      // Step 3: Read header size (varint)
-      const { result: headerSize, bytesRead: headerSizeBytes } = readVariant(
-        buffer.slice(offset)
-      );
-      offset += headerSizeBytes;
-
-      // Step 4: Parse serial types in the header
-      const serialTypes: number[] = [];
-      let headerRemainingBytes = headerSize - headerSizeBytes;
-      while (headerRemainingBytes > 0) {
-        const { result: serialType, bytesRead: serialTypeBytes } = readVariant(
-          buffer.slice(offset)
-        );
-        serialTypes.push(serialType);
-        offset += serialTypeBytes;
-        headerRemainingBytes -= serialTypeBytes;
-      }
-
-      // Step 5: Parse data
-      const data = [];
-      for (let i = 0; i < serialTypes.length; i++) {
-        const columnSize = getSerialTypeSize(serialTypes[i]);
-        data.push(
-          parseSerialTypeValue(
-            buffer.slice(offset, offset + columnSize),
-            serialTypes[i],
-            rowId
-          )
-        );
-        offset += columnSize;
-      }
-      //console.log(data);
-      return data;
+      offset += columnSize;
     }
-
-    // TABLE INTERIOR
-    else if (pageType === TABLE_INTERIOR) {
-      const pageNumberOfLeftChild = buffer.readInt32BE(0);
-      const { result: rowId, bytesRead: rowIdBytes } = readVariant(
-        buffer.slice(offset)
-      );
-    }
-
-    // INDEX LEAF
-    else if (pageType === INDEX_LEAF) {
-    }
-
-    // INDEX INTERIOR
-    else if (pageType === INDEX_INTERIOR) {
-    }
-
-    // Unsupported type
-    throw new Error("Unsupported cell type");
+    //console.log("cell data", data);
+    return data;
   }
 }

@@ -32,6 +32,7 @@ export interface BTreePageHeader {
   "start of cell content area": number; // Two-byte integer at offset 5 designating the start of the cell content area, with zero interpreted as 65536.
   "number of fragmented free bytes": number; // One-byte integer at offset 7 representing the number of fragmented free bytes within the cell content area.
   //"right-most pointer": number | null; // Four-byte page number at offset 8, applicable only to interior b-tree pages.
+  "right most pointer": number | null;
 }
 
 export enum RootPageCellData {
