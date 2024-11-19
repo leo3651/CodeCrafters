@@ -4,10 +4,16 @@ import {
   RootPageCellData,
   type BTreePageHeader,
   type DbFileHeader,
+  type IndexCell,
+  type TraversedPage,
 } from "./models";
 import {
+  binarySearch,
+  binarySearchFirstGreaterOrEqual,
+  binarySearchFirstGreaterOrEqualString,
   findAllOccurrencesWithBinarySearch,
   getSerialTypeSize,
+  mergeSort,
   parseSerialTypeValue,
   readVariant,
 } from "./utils";
@@ -27,8 +33,8 @@ export class SQLiteHandler {
   private rootPageBuffer!: Buffer;
   private data: string[][] = [];
   private readyPromise!: Promise<void>;
-  private found: any[] = [];
-  private isFound: boolean = false;
+  private found: IndexCell[] = [];
+  private alreadyTraversed: { [key: string]: TraversedPage } = {};
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -209,6 +215,38 @@ export class SQLiteHandler {
     return null;
   }
 
+  private checkForIndexSearch(
+    tableName: string,
+    searchColumn: string | null = null
+  ): string[] | null {
+    if (searchColumn === null) {
+      return null;
+    }
+
+    for (const cellPointer of this.rootCellPointersArr) {
+      const cellData = this.parseTableLeafCell(
+        this.rootPageBuffer.slice(cellPointer)
+      );
+      const indexedColumn = cellData[RootPageCellData.schema]
+        ?.split("(")[1]
+        ?.split(")")[0]
+        ?.split(",")
+        ?.map((colName) => colName.trim().split(" ")[0]);
+
+      if (
+        cellData[RootPageCellData.schemaTableName] === tableName.trim() &&
+        cellData[RootPageCellData.schemaType] === "index" &&
+        indexedColumn &&
+        indexedColumn.length &&
+        searchColumn.trim() === indexedColumn[0].trim()
+      ) {
+        return cellData;
+      }
+    }
+
+    return null;
+  }
+
   public async getColumnIndex(
     tableName: string,
     columnName: string
@@ -238,114 +276,229 @@ export class SQLiteHandler {
     return columnIndex;
   }
 
-  public async getTableData(tableName: string): Promise<string[][] | null> {
+  public async getTableData(
+    tableName: string,
+    searchColumn: string | null = null,
+    whereTerm: string | null = null
+  ): Promise<string[][] | null> {
     await this.ensureReady();
+    let rootPageTableIndex: number = -999;
+    let rootPageIndexTableIndex = -999;
 
-    let tablePageIndex: number | null = null;
-
-    const cellData = this.matchedTableRootData(tableName);
-    if (cellData) {
-      tablePageIndex = parseInt(cellData[RootPageCellData.schemaRootPage]) - 1;
+    const tableData = this.matchedTableRootData(tableName);
+    if (tableData) {
+      rootPageTableIndex =
+        parseInt(tableData[RootPageCellData.schemaRootPage]) - 1;
     }
 
-    if (tablePageIndex === null) {
+    if (rootPageTableIndex === -999) {
       throw new Error(`Table ${tableName} not found`);
     }
 
-    await this.traverseBTreePage(3, "bosnia and herzegovina");
+    const indexTableData = this.checkForIndexSearch(tableName, searchColumn);
+    if (indexTableData) {
+      rootPageIndexTableIndex =
+        parseInt(indexTableData[RootPageCellData.schemaRootPage]) - 1;
+      await this.traverseBTreePage(rootPageIndexTableIndex, whereTerm);
+      this.found = mergeSort(this.found);
+      await this.traverseBTreePage(rootPageTableIndex, whereTerm, true);
+      return this.data;
+    }
+
+    await this.traverseBTreePage(rootPageTableIndex, whereTerm);
+    // console.log("DATA", this.data);
+    // console.log("LAST LOF OF FOUND", this.found);
+    // console.log("TRAVERSED INDEX PAGES", this.traversedPages);
 
     return this.data;
   }
 
   private async traverseBTreePage(
     pageIndex: number,
-    searchValue?: string
+    searchValue: string | null = null,
+    indexSearch: boolean = false,
+    firstWhileLoop: boolean = true
   ): Promise<void> {
-    const pageHeaderObj = await this.parsePageHeader(
-      pageIndex * this.dbHeader["database page size"]
-    );
-    const pageBuffer = Buffer.from(
-      await this.getDBFileBufferAtOffset(
-        this.dbHeader["database page size"],
-        this.dbHeader["database page size"] * pageIndex
-      )
-    );
-    const cellPointers = await this.getCellPointerArray(
-      pageIndex * this.dbHeader["database page size"]
-    );
+    let pageHeaderObj: BTreePageHeader & {
+      BTreePageHeaderSize: number;
+    };
+    let pageBuffer: Buffer;
+    let cellPointers: number[];
+
+    if (this.alreadyTraversed[pageIndex]) {
+      pageHeaderObj = this.alreadyTraversed[pageIndex].pageHeaderObj;
+      pageBuffer = this.alreadyTraversed[pageIndex].pageBuffer;
+      cellPointers = this.alreadyTraversed[pageIndex].cellPointers;
+    } else {
+      pageHeaderObj = await this.parsePageHeader(
+        pageIndex * this.dbHeader["database page size"]
+      );
+      pageBuffer = Buffer.from(
+        await this.getDBFileBufferAtOffset(
+          this.dbHeader["database page size"],
+          this.dbHeader["database page size"] * pageIndex
+        )
+      );
+      cellPointers = await this.getCellPointerArray(
+        pageIndex * this.dbHeader["database page size"]
+      );
+    }
 
     // TABLE INTERIOR
     if (pageHeaderObj["b-tree page type"] === TABLE_INTERIOR) {
-      for (const cellPointer of cellPointers) {
-        const nextPageIndex = this.parseTableInteriorCell(
-          pageBuffer.slice(cellPointer)
-        ).leftChildPageNumber;
+      // console.log(`TABLE INTERIOR ${pageIndex}\n`);
 
-        this.parseTableInteriorCell(pageBuffer.slice(cellPointer));
-        await this.traverseBTreePage(nextPageIndex);
+      // Index search
+      if (indexSearch) {
+        if (!this.alreadyTraversed[pageIndex]) {
+          this.alreadyTraversed[pageIndex] = {
+            pageBuffer,
+            pageHeaderObj,
+            cellPointers,
+          };
+        }
+        const lastCell = this.parseTableInteriorCell(
+          pageBuffer.slice(cellPointers[cellPointers.length - 1])
+        );
+        while (this.found.length) {
+          if (this.found[0].id <= lastCell.rowId) {
+            const found = binarySearchFirstGreaterOrEqual(
+              cellPointers,
+              pageBuffer,
+              this.found[0].id,
+              this.parseTableInteriorCell.bind(this)
+            );
+            const leftChildPageNumber = this.parseTableInteriorCell(
+              pageBuffer.slice(cellPointers[found])
+            ).leftChildPageNumber;
+            await this.traverseBTreePage(
+              leftChildPageNumber,
+              searchValue,
+              true,
+              false
+            );
+            if (!firstWhileLoop) {
+              break;
+            }
+          } else {
+            if (this.found.length > 0 && pageHeaderObj["right most pointer"]) {
+              // console.log("CALLING RIGHT MOST POINTER");
+              await this.traverseBTreePage(
+                pageHeaderObj["right most pointer"],
+                searchValue,
+                true,
+                true
+              );
+            }
+            break;
+          }
+        }
       }
 
-      if (pageHeaderObj["right most pointer"]) {
-        await this.traverseBTreePage(pageHeaderObj["right most pointer"]);
+      // Not index search
+      else {
+        for (const cellPointer of cellPointers) {
+          const leftChildPageNumber = this.parseTableInteriorCell(
+            pageBuffer.slice(cellPointer)
+          ).leftChildPageNumber;
+          await this.traverseBTreePage(leftChildPageNumber);
+        }
+        if (pageHeaderObj["right most pointer"]) {
+          await this.traverseBTreePage(pageHeaderObj["right most pointer"]);
+        }
       }
     }
 
     // TABLE LEAF
     else if (pageHeaderObj["b-tree page type"] === TABLE_LEAF) {
-      cellPointers.forEach((cellPointer) => {
-        const cellData = this.parseTableLeafCell(pageBuffer.slice(cellPointer));
-        this.data.push(cellData);
-      });
+      // console.log(`TABLE LEAF ${pageIndex}\n`);
+
+      // Index search
+      if (indexSearch) {
+        for (let i = 0, n = cellPointers.length; i < n; i++) {
+          const found = binarySearch(
+            this.found,
+            pageBuffer,
+            cellPointers[i],
+            this.parseTableLeafCell.bind(this)
+          );
+          if (found !== -1) {
+            this.data.push(
+              this.parseTableLeafCell(pageBuffer.slice(cellPointers[i]))
+            );
+            this.found.splice(found, 1);
+          }
+        }
+      }
+
+      // Not index search
+      else {
+        cellPointers.forEach((cellPointer) => {
+          const cellData = this.parseTableLeafCell(
+            pageBuffer.slice(cellPointer)
+          );
+          this.data.push(cellData);
+        });
+      }
     }
 
     // INDEX LEAF
     else if (pageHeaderObj["b-tree page type"] === INDEX_LEAF) {
+      // console.log(`INDEX LEAF ${pageIndex}\n`);
+
       if (searchValue) {
         findAllOccurrencesWithBinarySearch(
           cellPointers,
           pageBuffer,
           searchValue,
           this.parseIndexLeafCell.bind(this)
-        ).forEach((cellPointer) => {
-          this.found.push(
-            this.parseIndexLeafCell(pageBuffer.slice(cellPointer))
+        )[0].forEach((cellPointer) => {
+          const cellData = this.parseIndexLeafCell(
+            pageBuffer.slice(cellPointer)
           );
+          this.found.push({
+            indexedValue: cellData.indexedValue,
+            id: parseInt(cellData.id),
+          });
         });
       }
     }
 
     // INDEX INTERIOR
     else if (pageHeaderObj["b-tree page type"] === INDEX_INTERIOR) {
-      console.log("CELLS ON PAGE");
-      cellPointers.forEach((cellPointer) => {
-        console.log(this.parseIndexInteriorCell(pageBuffer.slice(cellPointer)));
-      });
+      // console.log(`INDEX INTERIOR ${pageIndex}\n`);
 
       if (searchValue) {
-        const found = findAllOccurrencesWithBinarySearch(
-          cellPointers,
-          pageBuffer,
-          searchValue,
-          this.parseIndexInteriorCell.bind(this)
-        );
+        const [found, [lastFoundCellPointerIndex]] =
+          findAllOccurrencesWithBinarySearch(
+            cellPointers,
+            pageBuffer,
+            searchValue,
+            this.parseIndexInteriorCell.bind(this)
+          );
         if (found.length > 0) {
-          let pi = -999;
           for (const cellPointer of found) {
-            pi = this.parseIndexInteriorCell(
+            const cellData = this.parseIndexInteriorCell(
               pageBuffer.slice(cellPointer)
-            ).leftChildPageNumber;
+            );
+            const pi = cellData.leftChildPageNumber;
+
+            this.found.push({
+              id: parseInt(cellData.id),
+              indexedValue: cellData.indexedValue,
+            });
             await this.traverseBTreePage(pi, searchValue);
           }
-          await this.traverseBTreePage(pi + 1, searchValue);
-          console.log("FOUNDED", this.found);
+
+          const extraPageIndex = this.parseIndexInteriorCell(
+            pageBuffer.slice(cellPointers[lastFoundCellPointerIndex + 1])
+          ).leftChildPageNumber;
+          await this.traverseBTreePage(extraPageIndex, searchValue);
 
           return;
         }
       }
 
-      const leftChildPageNumber = this.parseIndexInteriorCell(
-        pageBuffer.slice(cellPointers[cellPointers.length - 1])
-      ).leftChildPageNumber;
       const lastCell = this.parseIndexInteriorCell(
         pageBuffer.slice(cellPointers[cellPointers.length - 1])
       );
@@ -355,14 +508,32 @@ export class SQLiteHandler {
         searchValue >= lastCell.indexedValue &&
         pageHeaderObj["right most pointer"]
       ) {
-        console.log("RIGHT", pageHeaderObj["right most pointer"]);
         await this.traverseBTreePage(
           pageHeaderObj["right most pointer"],
           searchValue
         );
       } else {
-        console.log("LEFT", leftChildPageNumber);
-        await this.traverseBTreePage(leftChildPageNumber, searchValue);
+        if (searchValue) {
+          const firstGreaterStringCellPointerIndex =
+            binarySearchFirstGreaterOrEqualString(
+              cellPointers,
+              pageBuffer,
+              searchValue,
+              this.parseIndexInteriorCell.bind(this)
+            );
+
+          const pageIndexToTraverse = this.parseIndexInteriorCell(
+            pageBuffer.slice(
+              cellPointers[
+                firstGreaterStringCellPointerIndex === 0
+                  ? firstGreaterStringCellPointerIndex
+                  : firstGreaterStringCellPointerIndex
+              ]
+            )
+          ).leftChildPageNumber;
+
+          await this.traverseBTreePage(pageIndexToTraverse, searchValue);
+        }
       }
     }
 
@@ -425,9 +596,9 @@ export class SQLiteHandler {
   private parseCellPayload(
     buffer: Buffer,
     offset: number,
-    rowId: number = -999
+    rowId: number = -99999
   ): string[] {
-    // Read header size (varint)
+    // Read header size (variant)
     const { result: headerSize, bytesRead: headerSizeBytes } = readVariant(
       buffer.slice(offset)
     );
@@ -458,7 +629,7 @@ export class SQLiteHandler {
       );
       offset += columnSize;
     }
-    //console.log("cell data", data);
+
     return data;
   }
 }

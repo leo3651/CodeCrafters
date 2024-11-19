@@ -42,3 +42,16 @@ export enum RootPageCellData {
   schemaRootPage,
   schema,
 }
+
+export interface IndexCell {
+  id: number;
+  indexedValue: string;
+}
+
+export interface TraversedPage {
+  pageHeaderObj: BTreePageHeader & {
+    BTreePageHeaderSize: number;
+  };
+  pageBuffer: Buffer;
+  cellPointers: number[];
+}

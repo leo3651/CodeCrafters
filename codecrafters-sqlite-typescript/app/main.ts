@@ -36,8 +36,8 @@ else if (command.toLowerCase().includes("select count(*)")) {
 
 // Select rows from columns
 else if (command.toLowerCase().startsWith("select")) {
-  let whereColumn = "";
-  let whereTerm = "";
+  let whereColumn: string = "";
+  let whereTerm: string = "";
   let whereColumnIndex: number = 0;
 
   let [rest, tableName] = command.toLowerCase().split(" from ");
@@ -61,7 +61,11 @@ else if (command.toLowerCase().startsWith("select")) {
     throw new Error("Invalid query format");
   }
 
-  const columnData = await sqliteHandler.getTableData(tableName);
+  const columnData = await sqliteHandler.getTableData(
+    tableName,
+    whereColumn,
+    whereTerm
+  );
   if (columnData !== null) {
     const columnIndexes: number[] = [];
     for (const columnName of columnNames) {
