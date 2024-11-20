@@ -27,11 +27,9 @@ else if (command === ".tables") {
 
 // Count rows in the table
 else if (command.toLowerCase().includes("select count(*)")) {
-  const queryTable = command.split(" ").at(-1) || "";
+  const tableName = command.split(" ").at(-1) || "";
 
-  const rowCount = await sqliteHandler.getTableRowCount(queryTable);
-
-  console.log(rowCount);
+  console.log(await sqliteHandler.getTableRowCount(tableName));
 }
 
 // Select rows from columns
@@ -66,6 +64,7 @@ else if (command.toLowerCase().startsWith("select")) {
     whereColumn,
     whereTerm
   );
+
   if (columnData !== null) {
     const columnIndexes: number[] = [];
     for (const columnName of columnNames) {
@@ -76,6 +75,7 @@ else if (command.toLowerCase().startsWith("select")) {
 
     for (let j = 0, m = columnData.length; j < m; j++) {
       let data = "";
+
       for (let i = 0, n = columnIndexes.length; i < n; i++) {
         if (!whereColumn) {
           data += `|${columnData[j][columnIndexes[i]]}`;
@@ -85,6 +85,7 @@ else if (command.toLowerCase().startsWith("select")) {
           }
         }
       }
+
       if (data) {
         console.log(data.slice(1));
       }

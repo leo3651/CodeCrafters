@@ -3,7 +3,7 @@ import { constants } from "fs";
 import {
   RootPageCellData,
   type BTreePageHeader,
-  type DbFileHeader,
+  type DBFileHeader,
   type IndexCell,
   type TraversedPage,
 } from "./models";
@@ -27,7 +27,7 @@ const INDEX_INTERIOR = 0x02; // 2
 
 export class SQLiteHandler {
   private readonly dbPath: string;
-  public dbHeader!: DbFileHeader;
+  public dbHeader!: DBFileHeader;
   public rootPageHeader!: BTreePageHeader;
   private rootCellPointersArr!: number[];
   private rootPageBuffer!: Buffer;
@@ -67,7 +67,7 @@ export class SQLiteHandler {
     return buffer;
   }
 
-  private async parseDBHeader(): Promise<DbFileHeader> {
+  private async parseDBHeader(): Promise<DBFileHeader> {
     const dbHeaderBuffer = await this.getDBFileBufferAtOffset(
       DB_HEADER_SIZE,
       0
@@ -169,7 +169,6 @@ export class SQLiteHandler {
 
   public async getTableNames(): Promise<string[]> {
     await this.ensureReady();
-
     const tableNames: string[] = [];
 
     this.rootCellPointersArr.forEach((cellPointer) =>
@@ -278,8 +277,8 @@ export class SQLiteHandler {
 
   public async getTableData(
     tableName: string,
-    searchColumn: string | null = null,
-    whereTerm: string | null = null
+    whereColumn: string,
+    whereTerm: string
   ): Promise<string[][] | null> {
     await this.ensureReady();
     let rootPageTableIndex: number = -999;
@@ -295,27 +294,25 @@ export class SQLiteHandler {
       throw new Error(`Table ${tableName} not found`);
     }
 
-    const indexTableData = this.checkForIndexSearch(tableName, searchColumn);
-    if (indexTableData) {
-      rootPageIndexTableIndex =
-        parseInt(indexTableData[RootPageCellData.schemaRootPage]) - 1;
-      await this.traverseBTreePage(rootPageIndexTableIndex, whereTerm);
-      this.found = mergeSort(this.found);
-      await this.traverseBTreePage(rootPageTableIndex, whereTerm, true);
-      return this.data;
+    if (whereColumn && whereTerm) {
+      const indexTableData = this.checkForIndexSearch(tableName, whereColumn);
+      if (indexTableData) {
+        rootPageIndexTableIndex =
+          parseInt(indexTableData[RootPageCellData.schemaRootPage]) - 1;
+        await this.traverseBTreePage(rootPageIndexTableIndex, whereTerm);
+        this.found = mergeSort(this.found);
+        await this.traverseBTreePage(rootPageTableIndex, whereTerm, true);
+        return this.data;
+      }
     }
 
     await this.traverseBTreePage(rootPageTableIndex, whereTerm);
-    // console.log("DATA", this.data);
-    // console.log("LAST LOF OF FOUND", this.found);
-    // console.log("TRAVERSED INDEX PAGES", this.traversedPages);
-
     return this.data;
   }
 
   private async traverseBTreePage(
     pageIndex: number,
-    searchValue: string | null = null,
+    whereTerm: string | null = null,
     indexSearch: boolean = false,
     firstWhileLoop: boolean = true
   ): Promise<void> {
@@ -360,6 +357,7 @@ export class SQLiteHandler {
         const lastCell = this.parseTableInteriorCell(
           pageBuffer.slice(cellPointers[cellPointers.length - 1])
         );
+
         while (this.found.length) {
           if (this.found[0].id <= lastCell.rowId) {
             const found = binarySearchFirstGreaterOrEqual(
@@ -373,7 +371,7 @@ export class SQLiteHandler {
             ).leftChildPageNumber;
             await this.traverseBTreePage(
               leftChildPageNumber,
-              searchValue,
+              whereTerm,
               true,
               false
             );
@@ -382,10 +380,9 @@ export class SQLiteHandler {
             }
           } else {
             if (this.found.length > 0 && pageHeaderObj["right most pointer"]) {
-              // console.log("CALLING RIGHT MOST POINTER");
               await this.traverseBTreePage(
                 pageHeaderObj["right most pointer"],
-                searchValue,
+                whereTerm,
                 true,
                 true
               );
@@ -446,11 +443,11 @@ export class SQLiteHandler {
     else if (pageHeaderObj["b-tree page type"] === INDEX_LEAF) {
       // console.log(`INDEX LEAF ${pageIndex}\n`);
 
-      if (searchValue) {
+      if (whereTerm) {
         findAllOccurrencesWithBinarySearch(
           cellPointers,
           pageBuffer,
-          searchValue,
+          whereTerm,
           this.parseIndexLeafCell.bind(this)
         )[0].forEach((cellPointer) => {
           const cellData = this.parseIndexLeafCell(
@@ -468,12 +465,12 @@ export class SQLiteHandler {
     else if (pageHeaderObj["b-tree page type"] === INDEX_INTERIOR) {
       // console.log(`INDEX INTERIOR ${pageIndex}\n`);
 
-      if (searchValue) {
+      if (whereTerm) {
         const [found, [lastFoundCellPointerIndex]] =
           findAllOccurrencesWithBinarySearch(
             cellPointers,
             pageBuffer,
-            searchValue,
+            whereTerm,
             this.parseIndexInteriorCell.bind(this)
           );
         if (found.length > 0) {
@@ -487,13 +484,13 @@ export class SQLiteHandler {
               id: parseInt(cellData.id),
               indexedValue: cellData.indexedValue,
             });
-            await this.traverseBTreePage(pi, searchValue);
+            await this.traverseBTreePage(pi, whereTerm);
           }
 
           const extraPageIndex = this.parseIndexInteriorCell(
             pageBuffer.slice(cellPointers[lastFoundCellPointerIndex + 1])
           ).leftChildPageNumber;
-          await this.traverseBTreePage(extraPageIndex, searchValue);
+          await this.traverseBTreePage(extraPageIndex, whereTerm);
 
           return;
         }
@@ -504,35 +501,29 @@ export class SQLiteHandler {
       );
 
       if (
-        searchValue &&
-        searchValue >= lastCell.indexedValue &&
+        whereTerm &&
+        whereTerm >= lastCell.indexedValue &&
         pageHeaderObj["right most pointer"]
       ) {
         await this.traverseBTreePage(
           pageHeaderObj["right most pointer"],
-          searchValue
+          whereTerm
         );
       } else {
-        if (searchValue) {
+        if (whereTerm) {
           const firstGreaterStringCellPointerIndex =
             binarySearchFirstGreaterOrEqualString(
               cellPointers,
               pageBuffer,
-              searchValue,
+              whereTerm,
               this.parseIndexInteriorCell.bind(this)
             );
 
           const pageIndexToTraverse = this.parseIndexInteriorCell(
-            pageBuffer.slice(
-              cellPointers[
-                firstGreaterStringCellPointerIndex === 0
-                  ? firstGreaterStringCellPointerIndex
-                  : firstGreaterStringCellPointerIndex
-              ]
-            )
+            pageBuffer.slice(cellPointers[firstGreaterStringCellPointerIndex])
           ).leftChildPageNumber;
 
-          await this.traverseBTreePage(pageIndexToTraverse, searchValue);
+          await this.traverseBTreePage(pageIndexToTraverse, whereTerm);
         }
       }
     }
@@ -545,7 +536,7 @@ export class SQLiteHandler {
 
   private parseTableLeafCell(buffer: Buffer) {
     let offset = 0;
-    // Step 1: Read payload size (varint)
+    // Step 1: Read payload size (variant)
     const { result: payloadSize, bytesRead: payloadSizeBytes } = readVariant(
       buffer.slice(offset)
     );

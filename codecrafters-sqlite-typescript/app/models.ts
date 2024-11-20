@@ -1,4 +1,4 @@
-export interface DbFileHeader {
+export interface DBFileHeader {
   "header string": string; // The header string: "SQLite format 3\000"
   "database page size": number; // The database page size in bytes.
   "file format write version": number; // 1 for legacy; 2 for WAL.
