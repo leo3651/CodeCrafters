@@ -1,5 +1,5 @@
-export function getQuestionTypeBuffer(recordType: string): Buffer {
-  const qTypeBuffer = Buffer.alloc(2);
+export function getRecordTypeBuffer(recordType: string): Buffer {
+  const rTypeBuffer = Buffer.alloc(2);
   let type = -999;
 
   // A
@@ -12,12 +12,12 @@ export function getQuestionTypeBuffer(recordType: string): Buffer {
     type = 5;
   }
 
-  qTypeBuffer.writeUint16BE(type, 0);
-  return qTypeBuffer;
+  rTypeBuffer.writeUint16BE(type, 0);
+  return rTypeBuffer;
 }
 
-export function getQuestionClassBuffer(qClassNum: number) {
-  const qClass = Buffer.alloc(2);
-  qClass.writeUint16BE(qClassNum, 0);
-  return qClass;
+export function getRecordClassBuffer(qClassNum: number) {
+  const recordClass = Buffer.alloc(2);
+  recordClass.writeUint16BE(qClassNum, 0);
+  return recordClass;
 }

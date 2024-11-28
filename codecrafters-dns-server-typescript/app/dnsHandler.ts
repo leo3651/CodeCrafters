@@ -1,23 +1,23 @@
-import crypto from "crypto";
-import { getQuestionClassBuffer, getQuestionTypeBuffer } from "./utils";
+import type { DnsHeader } from "./model";
+import { getRecordClassBuffer, getRecordTypeBuffer } from "./utils";
 
 export class DnsHandler {
   constructor() {}
 
-  createDnsHeader(
-    packetId: number = -9999,
-    isResponse: boolean = true,
-    operationCode: number = 0,
-    isAuthoritativeAnswer: boolean = false,
-    largerThan512Bytes: boolean = false,
-    isRecursionDesired: boolean = false,
-    isRecursionAvailable: boolean = false,
-    responseCode: number = 0,
-    questionCount: number = 0,
-    answerRecordCount: number = 0,
-    authorityRecordCount: number = 0,
-    additionalRecordCount: number = 0
-  ): Buffer {
+  createDnsHeader({
+    packetId = -9999,
+    isResponse = true,
+    operationCode = 0,
+    isAuthoritativeAnswer = false,
+    largerThan512Bytes = false,
+    isRecursionDesired = false,
+    isRecursionAvailable = false,
+    responseCode = 0,
+    questionCount = 0,
+    answerRecordCount = 0,
+    authorityRecordCount = 0,
+    additionalRecordCount = 0,
+  }: DnsHeader): Buffer {
     let dnsHeader: Buffer = Buffer.alloc(12);
     let byte1: number;
     let byte0: number;
@@ -94,11 +94,11 @@ export class DnsHandler {
     domainName: string,
     questionType: string,
     questionClass: number
-  ) {
-    const questionTypeBuffer = getQuestionTypeBuffer(questionType);
-    const questionClassBuffer = getQuestionClassBuffer(questionClass);
+  ): Buffer {
+    const questionTypeBuffer = getRecordTypeBuffer(questionType);
+    const questionClassBuffer = getRecordClassBuffer(questionClass);
     const encodedDomainNameBuffer = Buffer.from(
-      this.encodeDomainName(domainName) + "\0",
+      this.encodeDomainName(domainName),
       "binary"
     );
 
@@ -110,10 +110,38 @@ export class DnsHandler {
   }
 
   encodeDomainName(domainName: string): string {
-    return domainName
-      .split(".")
-      .filter((label) => label.trim() !== "")
-      .map((label) => `${String.fromCharCode(label.length)}${label}`)
-      .join("");
+    return (
+      domainName
+        .split(".")
+        .filter((label) => label.trim() !== "")
+        .map((label) => `${String.fromCharCode(label.length)}${label}`)
+        .join("") + "\0"
+    );
+  }
+
+  createAnswerSection(
+    domainName: string,
+    answerType: string,
+    answerClass: number,
+    timeToLive: number,
+    rData: string
+  ): Buffer {
+    const encodedDomainNameBuffer: Buffer = Buffer.from(
+      this.encodeDomainName(domainName)
+    );
+    const answerTypeBuffer = getRecordTypeBuffer(answerType);
+    const answerClassBuffer = getRecordClassBuffer(answerClass);
+    const timeToLiveBuffer = Buffer.alloc(4).writeUInt32BE(timeToLive, 0);
+    const rDataLengthBuffer = Buffer.alloc(2).writeUInt16BE(rData.length, 0);
+    const rDataBuffer = Buffer.from(rData, "binary");
+
+    return Buffer.concat([
+      new Uint8Array(encodedDomainNameBuffer),
+      new Uint8Array(answerTypeBuffer),
+      new Uint8Array(answerClassBuffer),
+      new Uint8Array(timeToLiveBuffer),
+      new Uint8Array(rDataLengthBuffer),
+      new Uint8Array(rDataBuffer),
+    ]);
   }
 }
