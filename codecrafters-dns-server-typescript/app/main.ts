@@ -10,10 +10,16 @@ udpSocket.on("message", (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
     console.log(`Received data from ${remoteAddr.address}:${remoteAddr.port}`);
     console.log("Received data buffer", data);
 
+    const parsedDnsHeader = dnsHandler.parseDnsHeader(data);
+
     const header = dnsHandler.createDnsHeader({
-      packetId: 1234,
+      isResponse: true,
+      packetId: parsedDnsHeader.packetId,
       questionCount: 1,
       answerRecordCount: 1,
+      isRecursionDesired: parsedDnsHeader.isRecursionDesired,
+      operationCode: parsedDnsHeader.operationCode,
+      responseCode: parsedDnsHeader.operationCode === 0 ? 0 : 4,
     });
     const questionSection = dnsHandler.createQuestionSection(
       "codecrafters.io",

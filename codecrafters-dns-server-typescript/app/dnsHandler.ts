@@ -36,7 +36,7 @@ export class DnsHandler {
     // QR - 1 bit, OPCODE - 4 bits, AA - 1 bit, TC - 1 bit, RD - 1 bit
     let byte2 = 0;
     if (isResponse) byte2 |= 0b10000000;
-    byte2 |= operationCode << 3;
+    byte2 |= operationCode;
     if (isAuthoritativeAnswer) byte2 |= 0b00000100;
     if (!isResponse && largerThan512Bytes) byte2 |= 0b00000010;
     if (isRecursionDesired) byte2 |= 0b00000001;
@@ -86,6 +86,8 @@ export class DnsHandler {
 
     dnsHeader[10] = byte10;
     dnsHeader[11] = byte11;
+
+    console.log(dnsHeader);
 
     return dnsHeader;
   }
@@ -143,5 +145,35 @@ export class DnsHandler {
       new Uint8Array(rDataLengthBuffer),
       new Uint8Array(rDataBuffer),
     ]);
+  }
+
+  parseDnsHeader(dnsHeaderBuffer: Buffer) {
+    const dnsHeaderInfo: DnsHeader = {};
+
+    const packetId = dnsHeaderBuffer.readUInt16BE(0);
+    dnsHeaderInfo.packetId = packetId;
+
+    const byte2 = dnsHeaderBuffer.readUInt8(2);
+
+    dnsHeaderInfo.isResponse = (byte2 & 0b10000000) === 0b10000000;
+    dnsHeaderInfo.operationCode = byte2 & 0b01111000;
+    dnsHeaderInfo.isAuthoritativeAnswer = (byte2 & 0b00000100) === 0b00000100;
+    dnsHeaderInfo.truncation = byte2 & 0b00000010;
+    dnsHeaderInfo.isRecursionDesired = (0b00000001 & byte2) === 0b00000001;
+
+    const byte3 = dnsHeaderBuffer.readUInt8(3);
+
+    dnsHeaderInfo.isRecursionAvailable = (byte3 & 0b10000000) === 0b10000000;
+    dnsHeaderInfo.reserved = byte3 & 0b01110000;
+    dnsHeaderInfo.responseCode = byte3 & 0b00001111;
+
+    dnsHeaderInfo.questionCount = dnsHeaderBuffer.readUInt16BE(4);
+    dnsHeaderInfo.answerRecordCount = dnsHeaderBuffer.readUInt16BE(6);
+    dnsHeaderInfo.authorityRecordCount = dnsHeaderBuffer.readUInt16BE(8);
+    dnsHeaderInfo.additionalRecordCount = dnsHeaderBuffer.readUInt16BE(10);
+
+    console.log(dnsHeaderInfo);
+
+    return dnsHeaderInfo;
   }
 }

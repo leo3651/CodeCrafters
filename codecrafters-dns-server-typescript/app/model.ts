@@ -1,5 +1,5 @@
 export interface DnsHeader {
-  packetId: number;
+  packetId?: number;
   isResponse?: boolean;
   operationCode?: number;
   isAuthoritativeAnswer?: boolean;
@@ -11,4 +11,6 @@ export interface DnsHeader {
   answerRecordCount?: number;
   authorityRecordCount?: number;
   additionalRecordCount?: number;
+  truncation?: number;
+  reserved?: number;
 }
