@@ -11,35 +11,60 @@ udpSocket.on("message", (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
     console.log("Received data buffer", data);
 
     const parsedDnsHeader = dnsHandler.parseDnsHeader(data);
+    const parsedQuestions = [];
+    let questionsBuffer: Buffer = Buffer.alloc(0);
+    let answersBuffer: Buffer = Buffer.alloc(0);
+
+    let i = 12;
+    while (i < data.length) {
+      const parsedQuestionSection = dnsHandler.parseQuestionSection(
+        data.slice(i),
+        data
+      );
+      i += parsedQuestionSection.endIndex;
+      parsedQuestions.push(parsedQuestionSection);
+    }
+
+    parsedQuestions.forEach((q) => {
+      const questionSection = dnsHandler.createQuestionSection(
+        q.domainName,
+        "A",
+        1
+      );
+      const answerSection = dnsHandler.createAnswerSection(
+        q.domainName,
+        "A",
+        1,
+        60,
+        "\x08\x08\x08\x08"
+      );
+
+      questionsBuffer = Buffer.concat([
+        new Uint8Array(questionsBuffer),
+        new Uint8Array(questionSection),
+      ]);
+      answersBuffer = Buffer.concat([
+        new Uint8Array(answersBuffer),
+        new Uint8Array(answerSection),
+      ]);
+    });
 
     const header = dnsHandler.createDnsHeader({
       isResponse: true,
       packetId: parsedDnsHeader.packetId,
-      questionCount: 1,
-      answerRecordCount: 1,
+      questionCount: parsedQuestions.length,
+      answerRecordCount: parsedQuestions.length,
       isRecursionDesired: parsedDnsHeader.isRecursionDesired,
       operationCode: parsedDnsHeader.operationCode,
       responseCode: parsedDnsHeader.operationCode === 0 ? 0 : 4,
     });
-    const questionSection = dnsHandler.createQuestionSection(
-      "codecrafters.io",
-      "A",
-      1
-    );
-    const answerSection = dnsHandler.createAnswerSection(
-      "codecrafters.io",
-      "A",
-      1,
-      60,
-      "\x08\x08\x08\x08"
-    );
 
     udpSocket.send(
       new Uint8Array(
         Buffer.concat([
           new Uint8Array(header),
-          new Uint8Array(questionSection),
-          new Uint8Array(answerSection),
+          new Uint8Array(questionsBuffer),
+          new Uint8Array(answersBuffer),
         ])
       ),
       remoteAddr.port,

@@ -87,8 +87,6 @@ export class DnsHandler {
     dnsHeader[10] = byte10;
     dnsHeader[11] = byte11;
 
-    console.log(dnsHeader);
-
     return dnsHeader;
   }
 
@@ -133,8 +131,10 @@ export class DnsHandler {
     );
     const answerTypeBuffer = getRecordTypeBuffer(answerType);
     const answerClassBuffer = getRecordClassBuffer(answerClass);
-    const timeToLiveBuffer = Buffer.alloc(4).writeUInt32BE(timeToLive, 0);
-    const rDataLengthBuffer = Buffer.alloc(2).writeUInt16BE(rData.length, 0);
+    const timeToLiveBuffer = Buffer.alloc(4);
+    timeToLiveBuffer.writeUInt32BE(timeToLive, 0);
+    const rDataLengthBuffer = Buffer.alloc(2);
+    rDataLengthBuffer.writeUInt16BE(rData.length, 0);
     const rDataBuffer = Buffer.from(rData, "binary");
 
     return Buffer.concat([
@@ -172,8 +172,48 @@ export class DnsHandler {
     dnsHeaderInfo.authorityRecordCount = dnsHeaderBuffer.readUInt16BE(8);
     dnsHeaderInfo.additionalRecordCount = dnsHeaderBuffer.readUInt16BE(10);
 
-    console.log(dnsHeaderInfo);
-
     return dnsHeaderInfo;
+  }
+
+  parseQuestionSection(questionSectionBuffer: Buffer, fullMessage: Buffer) {
+    let i = 0;
+    const labels = [];
+    while (questionSectionBuffer[i] !== 0) {
+      if ((questionSectionBuffer[i] & 0b11000000) === 0b11000000) {
+        let pointer = 0;
+        pointer = 0b00111111 & questionSectionBuffer[i];
+        pointer <<= 8;
+        pointer = 0b11111111 & questionSectionBuffer[i + 1];
+        console.log(pointer);
+
+        while (fullMessage[pointer] !== 0) {
+          labels.push(
+            fullMessage.slice(pointer + 1, pointer + 1 + fullMessage[pointer])
+          );
+          pointer += fullMessage[pointer] + 1;
+        }
+        i++;
+        break;
+      } else {
+        labels.push(
+          questionSectionBuffer.slice(i + 1, i + 1 + questionSectionBuffer[i])
+        );
+        i += questionSectionBuffer[i] + 1;
+      }
+    }
+
+    const domainName = labels.join(".");
+    i++;
+    const questionType = questionSectionBuffer.slice(i, i + 2);
+    i += 2;
+    const questionClass = questionSectionBuffer.slice(i, i + 2);
+    i += 2;
+
+    return { domainName, questionType, questionClass, endIndex: i } as {
+      domainName: string;
+      questionType: Buffer;
+      questionClass: Buffer;
+      endIndex: number;
+    };
   }
 }
