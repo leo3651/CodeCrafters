@@ -1,4 +1,4 @@
-import type { DnsHeader } from "./model";
+import type { DnsHeader, ParsedAnswer, ParsedQuestion } from "./model";
 import { getRecordClassBuffer, getRecordTypeBuffer } from "./utils";
 
 export class DnsHandler {
@@ -109,16 +109,6 @@ export class DnsHandler {
     ]);
   }
 
-  encodeDomainName(domainName: string): string {
-    return (
-      domainName
-        .split(".")
-        .filter((label) => label.trim() !== "")
-        .map((label) => `${String.fromCharCode(label.length)}${label}`)
-        .join("") + "\0"
-    );
-  }
-
   createAnswerSection(
     domainName: string,
     answerType: string,
@@ -147,7 +137,7 @@ export class DnsHandler {
     ]);
   }
 
-  parseDnsHeader(dnsHeaderBuffer: Buffer) {
+  parseDnsHeader(dnsHeaderBuffer: Buffer): DnsHeader {
     const dnsHeaderInfo: DnsHeader = {};
 
     const packetId = dnsHeaderBuffer.readUInt16BE(0);
@@ -175,45 +165,98 @@ export class DnsHandler {
     return dnsHeaderInfo;
   }
 
-  parseQuestionSection(questionSectionBuffer: Buffer, fullMessage: Buffer) {
-    let i = 0;
-    const labels = [];
-    while (questionSectionBuffer[i] !== 0) {
-      if ((questionSectionBuffer[i] & 0b11000000) === 0b11000000) {
-        let pointer = 0;
-        pointer = 0b00111111 & questionSectionBuffer[i];
-        pointer <<= 8;
-        pointer = 0b11111111 & questionSectionBuffer[i + 1];
-        console.log(pointer);
+  parseQuestionSection(
+    MessageBuf: Buffer,
+    questionsCount: number
+  ): { parsedQuestions: ParsedQuestion[]; endIndex: number } {
+    let parsedQuestions: ParsedQuestion[] = [];
+    let i = 12;
 
-        while (fullMessage[pointer] !== 0) {
-          labels.push(
-            fullMessage.slice(pointer + 1, pointer + 1 + fullMessage[pointer])
-          );
-          pointer += fullMessage[pointer] + 1;
+    while (parsedQuestions.length < questionsCount) {
+      const labels: Buffer[] = [];
+
+      i = this.decodeDomainName(MessageBuf, labels, i);
+
+      const domainName = labels.join(".");
+      i++;
+      const questionType = MessageBuf.slice(i, i + 2);
+      i += 2;
+      const questionClass = MessageBuf.slice(i, i + 2);
+      i += 2;
+
+      parsedQuestions.push({ domainName, questionType, questionClass });
+    }
+
+    return { parsedQuestions, endIndex: i };
+  }
+
+  parseAnswersSection(
+    MessageBuf: Buffer,
+    startingIndex: number,
+    answersCount: number
+  ): ParsedAnswer[] {
+    let i = startingIndex;
+    const parsedAnswers: ParsedAnswer[] = [];
+
+    while (parsedAnswers.length < answersCount) {
+      const labels: Buffer[] = [];
+
+      i = this.decodeDomainName(MessageBuf, labels, i);
+
+      const domainName = labels.join(".");
+      i++;
+      const answerType = MessageBuf.slice(i, i + 2);
+      i += 2;
+      const answerClass = MessageBuf.slice(i, i + 2);
+      i += 2;
+      const timeToLive = MessageBuf.slice(i, i + 4).readUInt32BE(0);
+      i += 4;
+      const length = MessageBuf.slice(i, i + 2).readUInt16BE(0);
+      i += 2;
+      const data = MessageBuf.slice(i, i + length).toString("binary");
+
+      parsedAnswers.push({
+        domainName,
+        answerType,
+        answerClass,
+        timeToLive,
+        data,
+      });
+    }
+
+    return parsedAnswers;
+  }
+
+  encodeDomainName(domainName: string): string {
+    return (
+      domainName
+        .split(".")
+        .filter((label) => label.trim() !== "")
+        .map((label) => `${String.fromCharCode(label.length)}${label}`)
+        .join("") + "\0"
+    );
+  }
+
+  decodeDomainName(buffer: Buffer, labels: Buffer[], i: number): number {
+    while (buffer[i] !== 0) {
+      if ((buffer[i] & 0b11000000) === 0b11000000) {
+        let pointer = 0;
+        pointer = 0b00111111 & buffer[i];
+        pointer <<= 8;
+        pointer = 0b11111111 & buffer[i + 1];
+
+        while (buffer[pointer] !== 0) {
+          labels.push(buffer.slice(pointer + 1, pointer + 1 + buffer[pointer]));
+          pointer += buffer[pointer] + 1;
         }
         i++;
         break;
       } else {
-        labels.push(
-          questionSectionBuffer.slice(i + 1, i + 1 + questionSectionBuffer[i])
-        );
-        i += questionSectionBuffer[i] + 1;
+        labels.push(buffer.slice(i + 1, i + 1 + buffer[i]));
+        i += buffer[i] + 1;
       }
     }
 
-    const domainName = labels.join(".");
-    i++;
-    const questionType = questionSectionBuffer.slice(i, i + 2);
-    i += 2;
-    const questionClass = questionSectionBuffer.slice(i, i + 2);
-    i += 2;
-
-    return { domainName, questionType, questionClass, endIndex: i } as {
-      domainName: string;
-      questionType: Buffer;
-      questionClass: Buffer;
-      endIndex: number;
-    };
+    return i;
   }
 }

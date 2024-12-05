@@ -14,3 +14,17 @@ export interface DnsHeader {
   truncation?: number;
   reserved?: number;
 }
+
+export interface ParsedQuestion {
+  domainName: string;
+  questionType: Buffer;
+  questionClass: Buffer;
+}
+
+export interface ParsedAnswer {
+  domainName: string;
+  answerType: Buffer;
+  answerClass: Buffer;
+  timeToLive: number;
+  data: string;
+}
