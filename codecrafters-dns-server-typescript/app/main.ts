@@ -5,6 +5,7 @@ import type { DnsHeader, ParsedAnswer, ParsedQuestion } from "./model";
 const udpSocket: dgram.Socket = dgram.createSocket("udp4");
 udpSocket.bind(2053, "127.0.0.1");
 const dnsHandler = new DnsHandler();
+
 const address = process.argv[3];
 const [resolverIp, resolverPort] = address ? address.split(":") : [null, null];
 
