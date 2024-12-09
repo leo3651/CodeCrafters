@@ -1,12 +1,15 @@
 import * as fs from "fs";
 import zlib from "zlib";
+import crypto from "crypto";
 
 const args = process.argv.slice(2);
 const command = args[0];
+const flag = args[1];
 
 enum Commands {
   Init = "init",
   catFile = "cat-file",
+  hashObject = "hash-object",
 }
 
 switch (command) {
@@ -21,7 +24,6 @@ switch (command) {
 
   // CAT FILE
   case Commands.catFile:
-    const flag = args[1];
     const shaHash = args[2];
 
     if (flag === "-p") {
@@ -38,6 +40,39 @@ switch (command) {
     }
     break;
 
+  // HASH OBJECT
+  case Commands.hashObject:
+    const fileName = args[2];
+
+    if (flag === "-w") {
+      const fileContent = new Uint8Array(fs.readFileSync("./" + fileName));
+      const type = new Uint8Array(Buffer.from("blob "));
+      const length = new Uint8Array(
+        Buffer.from(fileContent.length.toString(), "binary")
+      );
+      const blob = new Uint8Array(
+        Buffer.concat([
+          type,
+          length,
+          new Uint8Array(Buffer.from([0])),
+          fileContent,
+        ])
+      );
+
+      const compressedBlob = new Uint8Array(zlib.deflateSync(blob));
+      const blobSha1Hash = crypto.createHash("sha1").update(blob).digest("hex");
+
+      console.log(blobSha1Hash);
+
+      const blobDir = blobSha1Hash.slice(0, 2);
+      const blobFile = blobSha1Hash.slice(2);
+
+      fs.mkdirSync(`.git/objects/${blobDir}`);
+      fs.writeFileSync(`.git/objects/${blobDir}/${blobFile}`, compressedBlob);
+    }
+
+    break;
+
   default:
-    throw new Error(`Unknown command ${command}`);
+  // throw new Error(`Unknown command ${command}`);
 }
