@@ -13,6 +13,7 @@ enum Commands {
   hashObject = "hash-object",
   lsTree = "ls-tree",
   writeTree = "write-tree",
+  commit = "commit-tree",
 }
 
 switch (command) {
@@ -48,6 +49,17 @@ switch (command) {
   case Commands.writeTree:
     const treeObjSha1Hash = gitHandler.createTreeObjectsRecursively(".");
     console.log(treeObjSha1Hash.toString("hex"));
+    break;
+
+  // WRITE TREE
+  case Commands.commit:
+    const treeSha1Hash = args[1];
+    const parentCommit = args[3];
+    const message = args[5];
+    console.log(
+      gitHandler.createCommitObject(treeSha1Hash, message, parentCommit)
+    );
+
     break;
 
   default:
