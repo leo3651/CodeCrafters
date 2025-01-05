@@ -14,6 +14,7 @@ enum Commands {
   lsTree = "ls-tree",
   writeTree = "write-tree",
   commit = "commit-tree",
+  clone = "clone",
 }
 
 switch (command) {
@@ -25,7 +26,7 @@ switch (command) {
   // CAT FILE
   case Commands.catFile:
     if (flag === "-p") {
-      const decompressedBlobPayload = gitHandler.readBlob(fileSha1Hash);
+      const decompressedBlobPayload = gitHandler.readBlobObject(fileSha1Hash);
       process.stdout.write(decompressedBlobPayload.toString());
     }
     break;
@@ -33,21 +34,21 @@ switch (command) {
   // HASH OBJECT
   case Commands.hashObject:
     if (flag === "-w") {
-      console.log(gitHandler.createBlob(".", fileName));
+      console.log(gitHandler.writeBlobObject(".", fileName));
     }
     break;
 
   // LS TREE
   case Commands.lsTree:
     if (flag === "--name-only") {
-      const entries = gitHandler.readTree(fileSha1Hash);
+      const entries = gitHandler.readTreeObject(fileSha1Hash);
       entries?.forEach((entry) => console.log(entry.name));
     }
     break;
 
   // WRITE TREE
   case Commands.writeTree:
-    const treeObjSha1Hash = gitHandler.createTreeObjectsRecursively(".");
+    const treeObjSha1Hash = gitHandler.writeTreeObjectsRecursively(".");
     console.log(treeObjSha1Hash.toString("hex"));
     break;
 
@@ -57,8 +58,18 @@ switch (command) {
     const parentCommit = args[3];
     const message = args[5];
     console.log(
-      gitHandler.createCommitObject(treeSha1Hash, message, parentCommit)
+      gitHandler.writeCommitObject(treeSha1Hash, message, parentCommit)
     );
+
+    break;
+
+  // CLONE
+  case Commands.clone:
+    const cloneURL = args[1];
+    const dir = args[2];
+    gitHandler.clone(cloneURL, dir).then(() => {
+      console.log("FINISHED");
+    });
 
     break;
 
