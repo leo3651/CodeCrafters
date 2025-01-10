@@ -7,7 +7,8 @@ import {
   type ObjectHeader,
   type DecompressedZlibContent,
   type DecompressedObject,
-  type gitObjectFile,
+  type GitObjectFile,
+  type DeltaGitObject,
 } from "./model";
 import axios, { type AxiosResponse } from "axios";
 
@@ -16,42 +17,24 @@ const REF_SIZE = 20;
 export class GitHandler {
   constructor() {}
 
-  gitInit(): void {
-    fs.mkdirSync(".git", { recursive: true });
-    fs.mkdirSync(".git/objects", { recursive: true });
-    fs.mkdirSync(".git/refs", { recursive: true });
-    fs.writeFileSync(".git/HEAD", "ref: refs/heads/main\n");
-    console.log("Initialized git directory");
+  gitInit(basePath = ""): void {
+    fs.mkdirSync(`${basePath}.git`, { recursive: true });
+    fs.mkdirSync(`${basePath}.git/objects`, { recursive: true });
+    fs.mkdirSync(`${basePath}.git/refs`, { recursive: true });
+    fs.writeFileSync(`${basePath}.git/HEAD`, `ref: refs/heads/main\n`);
+    console.log(`Initialized git directory`);
   }
 
-  readBlobObject(blobSha1Hash: string): Buffer {
-    const blobDir = blobSha1Hash.slice(0, 2);
-    const blobFile = blobSha1Hash.slice(2);
-
-    const blobContent = fs.readFileSync(`.git/objects/${blobDir}/${blobFile}`);
-    const decompressedBlobContent = zlib.unzipSync(new Uint8Array(blobContent));
-    const nullByteIndex = decompressedBlobContent.indexOf(0);
-
-    return decompressedBlobContent.slice(nullByteIndex + 1);
-  }
-
-  createBlobObject(blobContent: Buffer): gitObjectFile {
-    const blobFile = Buffer.concat([
-      new Uint8Array(Buffer.from(`blob ${blobContent.length}\0`)),
-      new Uint8Array(blobContent),
-    ]);
-
-    return {
-      fileContent: blobFile,
-      sha1Hash: this.createSha1HexHash(blobFile),
-    };
+  readBlobObject(blobSha1Hash: string, basePath: string = ""): Buffer {
+    const { payload } = this.readGitObject(blobSha1Hash, basePath);
+    return payload;
   }
 
   writeBlobObject(path: string, fileName: string): string {
     const fileContent = fs.readFileSync(`${path}/${fileName}`);
     const blobGitObject = this.createBlobObject(fileContent);
 
-    this.writeObject(
+    this.writeGitObject(
       blobGitObject.fileContent,
       blobGitObject.sha1Hash.toString("hex")
     );
@@ -59,26 +42,28 @@ export class GitHandler {
     return blobGitObject.sha1Hash.toString("hex");
   }
 
-  readTreeObject(treeSha1Hash: string): Entry[] {
-    const treeDir = treeSha1Hash.slice(0, 2);
-    const treeFile = treeSha1Hash.slice(2);
+  createBlobObject(blobContent: Buffer): GitObjectFile {
+    const blobFile = Buffer.concat([
+      new Uint8Array(Buffer.from(`blob ${blobContent.length}\0`)),
+      new Uint8Array(blobContent),
+    ]);
 
-    const treeContent = fs.readFileSync(`.git/objects/${treeDir}/${treeFile}`);
-    const decompressedTreeContent = zlib.unzipSync(new Uint8Array(treeContent));
-
-    return this.parseTreeObjectEntries(decompressedTreeContent);
+    return {
+      sha1Hash: this.createSha1HexHash(blobFile),
+      fileContent: blobFile,
+      payload: blobContent,
+      type: this.getGitObjectType("blob"),
+      length: blobContent.length,
+    };
   }
 
-  parseTreeObjectEntries(buf: Buffer): Entry[] {
-    const parsedEntries: Entry[] = [];
+  readTreeObject(treeSha1Hash: string, basePath: string = ""): Entry[] {
+    const { payload } = this.readGitObject(treeSha1Hash, basePath);
+    return this.parseTreeObjectEntries(payload);
+  }
 
-    let entries = buf;
-    if (buf.toString().includes("tree ")) {
-      const treeLen = Number.parseInt(
-        buf.toString().split("tree ")[1].split("\0")[0]
-      );
-      entries = buf.slice(buf.indexOf(0) + 1);
-    }
+  parseTreeObjectEntries(entries: Buffer): Entry[] {
+    const parsedEntries: Entry[] = [];
 
     while (entries.length) {
       const spaceCharIndex = entries.indexOf(32);
@@ -87,15 +72,16 @@ export class GitHandler {
       const mode = entries.slice(0, spaceCharIndex).toString();
       const name = entries.slice(spaceCharIndex + 1, nullByteIndex).toString();
       const sha1Hash = entries.slice(nullByteIndex + 1, nullByteIndex + 1 + 20);
+      const sha1HexHash = sha1Hash.toString("hex");
 
       parsedEntries.push({
         name,
         mode,
         sha1Hash,
+        sha1HexHash,
       } as Entry);
 
-      const nextOffset =
-        mode.length + 1 + name.length + 1 + sha1Hash.length + 1;
+      const nextOffset = mode.length + name.length + 1 + sha1Hash.length + 1;
       entries = entries.slice(nextOffset);
     }
 
@@ -139,7 +125,7 @@ export class GitHandler {
 
   writeTreeObject(entries: Entry[]): Buffer {
     const treeGitObject = this.createTreeObject(entries);
-    this.writeObject(
+    this.writeGitObject(
       treeGitObject.fileContent,
       treeGitObject.sha1Hash.toString("hex")
     );
@@ -147,7 +133,7 @@ export class GitHandler {
     return treeGitObject.sha1Hash;
   }
 
-  createTreeObject(entries: Entry[]): gitObjectFile {
+  createTreeObject(entries: Entry[]): GitObjectFile {
     let content = Buffer.alloc(0);
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -165,8 +151,11 @@ export class GitHandler {
     ]);
 
     return {
-      fileContent: treeFile,
       sha1Hash: this.createSha1HexHash(treeFile),
+      fileContent: treeFile,
+      payload: content,
+      type: this.getGitObjectType("tree"),
+      length: content.length,
     };
   }
 
@@ -188,7 +177,7 @@ export class GitHandler {
     ]);
 
     const commitGitObject = this.createCommitObject(content);
-    this.writeObject(
+    this.writeGitObject(
       commitGitObject.fileContent,
       commitGitObject.sha1Hash.toString("hex")
     );
@@ -196,19 +185,22 @@ export class GitHandler {
     return commitGitObject.sha1Hash.toString("hex");
   }
 
-  createCommitObject(commitContent: Buffer): gitObjectFile {
+  createCommitObject(commitContent: Buffer): GitObjectFile {
     const commitFile = Buffer.concat([
       new Uint8Array(Buffer.from(`commit ${commitContent.length}\0`)),
       new Uint8Array(commitContent),
     ]);
 
     return {
-      fileContent: commitFile,
       sha1Hash: this.createSha1HexHash(commitFile),
+      fileContent: commitFile,
+      payload: commitContent,
+      type: this.getGitObjectType("commit"),
+      length: commitContent.length,
     };
   }
 
-  writeObject(content: Buffer, sha1Hash: string): void {
+  writeGitObject(content: Buffer, sha1Hash: string, basePath = ""): void {
     const compressedFile = new Uint8Array(
       zlib.deflateSync(new Uint8Array(content))
     );
@@ -216,51 +208,83 @@ export class GitHandler {
     const dir = sha1Hash.slice(0, 2);
     const file = sha1Hash.slice(2);
 
-    fs.mkdirSync(`.git/objects/${dir}`, { recursive: true });
-    fs.writeFileSync(`.git/objects/${dir}/${file}`, compressedFile);
+    fs.mkdirSync(`${basePath}.git/objects/${dir}`, { recursive: true });
+    fs.writeFileSync(`${basePath}.git/objects/${dir}/${file}`, compressedFile);
+  }
+
+  readGitObject(fileSha1Hash: string, basePath = ""): GitObjectFile {
+    const dir = fileSha1Hash.slice(0, 2);
+    const file = fileSha1Hash.slice(2);
+
+    const fileContent = fs.readFileSync(
+      `${basePath}.git/objects/${dir}/${file}`
+    );
+
+    const decompressedFileContent = zlib.unzipSync(new Uint8Array(fileContent));
+
+    const nullByteIndex = decompressedFileContent.indexOf("\0");
+    const header = decompressedFileContent
+      .toString()
+      .slice(0, nullByteIndex)
+      .split(" ");
+
+    const type = this.getGitObjectType(header[0]);
+    const length = parseInt(header[1]);
+    const payload = decompressedFileContent.slice(nullByteIndex + 1);
+
+    return {
+      sha1Hash: Buffer.from(fileSha1Hash, "hex"),
+      fileContent: decompressedFileContent,
+      payload,
+      type,
+      length,
+    };
   }
 
   createSha1HexHash(content: Buffer): Buffer {
     return crypto.createHash("sha1").update(new Uint8Array(content)).digest();
   }
 
+  getGitObjectType(type: string): ObjectType {
+    if (type.trim() === "commit") {
+      return ObjectType.OBJ_COMMIT;
+    } else if (type.trim() === "tree") {
+      return ObjectType.OBJ_TREE;
+    } else if (type.trim() === "blob") {
+      return ObjectType.OBJ_BLOB;
+    }
+    throw new Error("Object type does not exists");
+  }
+
   async clone(cloneURL: string, dir: string) {
     // HANDLE REQUESTS
     const { packHash, ref } = await this.getPackFileHash(cloneURL);
     const res = await this.getPackFileFromServer(cloneURL, packHash);
-    const { objects, checksumHash } = await this.getRawGitObjects(res.data);
+    const { objects, checksumHash } = await this.getRawGitObjectsContent(
+      res.data
+    );
+
     console.log("reference:", ref);
     console.log("checksum hash:", checksumHash);
+    const { gitObjects, deltaObjects } = await this.createGitObjects(objects);
 
-    //UNPACK
-  }
+    fs.mkdirSync(dir);
+    this.gitInit(`${dir}/`);
 
-  async fun() {}
+    fs.writeFileSync(`${dir}/.git/HEAD`, `ref: ${ref}`);
+    fs.mkdirSync(`${dir}/.git/refs/heads`, { recursive: true });
+    fs.writeFileSync(`${dir}/.git/refs/heads/${ref.split("/")[2]}`, packHash);
 
-  async getRawGitObjects(
-    data: Buffer
-  ): Promise<{ objects: DecompressedObject[]; checksumHash: Buffer }> {
-    const packData: Buffer = data.slice(4);
-    const packObjCount = packData.readUInt32BE(12);
-    const packObjects = packData.slice(16);
-    let i = 0;
-    const objects: DecompressedObject[] = [];
-
-    for (let count = 0; count < packObjCount; count++) {
-      const obj = await this.parsePackFile(packObjects, i);
-      console.log("PARSED OBJECT\n", obj);
-      console.log("OBJECT CONTENT:");
-      console.log(obj.objectContent.toString("binary"));
-      console.log("FINISH\n\n\n\n\n\n");
-      i += obj.parsedBytes;
-
-      objects.push(obj);
+    for (const gitObj of gitObjects) {
+      this.writeGitObject(
+        gitObj.fileContent,
+        gitObj.sha1Hash.toString("hex"),
+        `${dir}/`
+      );
     }
 
-    const checksumHash = data.slice(data.length - 20);
-    i += 20;
-
-    return { objects, checksumHash };
+    this.resolveDeltaObjects(deltaObjects, `${dir}/`);
+    console.log(deltaObjects);
   }
 
   async getPackFileHash(
@@ -302,35 +326,60 @@ export class GitHandler {
     });
   }
 
-  async parsePackFile(buffer: Buffer, i: number): Promise<DecompressedObject> {
-    const objHeader = this.parsePackFileObjectHeader(buffer, i);
-    i += objHeader.parsedBytes;
-    console.log("OBJ HEADER\n", objHeader);
+  async getRawGitObjectsContent(
+    responseData: Buffer
+  ): Promise<{ objects: DecompressedObject[]; checksumHash: Buffer }> {
+    const packData: Buffer = responseData.slice(4);
+    const packObjCount = packData.readUInt32BE(12);
+    const packObjects = packData.slice(16);
+    let i = 0;
+    const objects: DecompressedObject[] = [];
 
-    if (
-      ObjectType.OBJ_REF_DELTA === objHeader.objectType ||
-      ObjectType.OBJ_OFS_DELTA === objHeader.objectType
-    ) {
-      const ref = buffer.slice(i, i + REF_SIZE);
-      const { objectContent: content, parsedBytes } =
+    for (let count = 0; count < packObjCount; count++) {
+      const obj = await this.parsePackFile(packObjects, i);
+      i += obj.parsedBytes;
+
+      objects.push(obj);
+    }
+
+    const checksumHash = responseData.slice(responseData.length - 20);
+    i += 20;
+
+    return { objects, checksumHash };
+  }
+
+  async parsePackFile(
+    packObjBuffer: Buffer,
+    i: number
+  ): Promise<DecompressedObject> {
+    const objHeader = this.parsePackFileObjectHeader(packObjBuffer, i);
+    i += objHeader.parsedBytes;
+
+    // Delta object
+    if (ObjectType.OBJ_REF_DELTA === objHeader.objectType) {
+      const deltaRef = packObjBuffer.slice(i, i + REF_SIZE);
+      const { objectContent, parsedBytes } =
         await this.decompressPackFileObject(
-          buffer.slice(i + REF_SIZE),
+          packObjBuffer.slice(i + REF_SIZE),
           objHeader.objectSize
         );
       return {
-        objectContent: content,
+        objectContent,
         parsedBytes: parsedBytes + objHeader.parsedBytes + REF_SIZE,
         objectType: objHeader.objectType,
-        ref,
+        deltaRef,
       };
-    } else {
-      const { objectContent: content, parsedBytes } =
+    }
+
+    // Non delta objects
+    else {
+      const { objectContent, parsedBytes } =
         await this.decompressPackFileObject(
-          buffer.slice(i),
+          packObjBuffer.slice(i),
           objHeader.objectSize
         );
       return {
-        objectContent: content,
+        objectContent,
         parsedBytes: parsedBytes + objHeader.parsedBytes,
         objectType: objHeader.objectType,
       };
@@ -393,4 +442,71 @@ export class GitHandler {
       });
     });
   }
+
+  async createGitObjects(objects: DecompressedObject[]): Promise<{
+    gitObjects: GitObjectFile[];
+    deltaObjects: DeltaGitObject[];
+  }> {
+    const gitObjects: GitObjectFile[] = [];
+    const deltaObjects: DeltaGitObject[] = [];
+
+    objects.forEach((object) => {
+      let gitObjectFileContent = Buffer.alloc(0);
+      let gitObjectFileSha1Hash = Buffer.alloc(0);
+
+      // Fill delta objects array
+      if (object.objectType === ObjectType.OBJ_REF_DELTA) {
+        if (!object.deltaRef) {
+          throw new Error("Delta reference does not exists");
+        }
+
+        deltaObjects.push({
+          ref: object.deltaRef,
+          instructions: object.objectContent,
+          type: object.objectType,
+        });
+      }
+
+      // Fill git objects array
+      else {
+        // Commit object
+        if (object.objectType === ObjectType.OBJ_COMMIT) {
+          const { sha1Hash, fileContent } = this.createCommitObject(
+            object.objectContent
+          );
+          gitObjectFileContent = fileContent;
+          gitObjectFileSha1Hash = sha1Hash;
+        }
+
+        // Tree object
+        else if (object.objectType === ObjectType.OBJ_TREE) {
+          const entries = this.parseTreeObjectEntries(object.objectContent);
+          const { sha1Hash, fileContent } = this.createTreeObject(entries);
+          gitObjectFileContent = fileContent;
+          gitObjectFileSha1Hash = sha1Hash;
+        }
+
+        // Blob object
+        else if (object.objectType === ObjectType.OBJ_BLOB) {
+          const { fileContent, sha1Hash } = this.createBlobObject(
+            object.objectContent
+          );
+          gitObjectFileContent = fileContent;
+          gitObjectFileSha1Hash = sha1Hash;
+        }
+
+        gitObjects.push({
+          sha1Hash: gitObjectFileSha1Hash,
+          fileContent: gitObjectFileContent,
+          payload: object.objectContent,
+          type: object.objectType,
+          length: object.objectContent.length,
+        });
+      }
+    });
+
+    return { gitObjects, deltaObjects };
+  }
+
+  resolveDeltaObjects(deltaObjects: DeltaGitObject[], basePath: string) {}
 }

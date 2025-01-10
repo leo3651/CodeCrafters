@@ -2,6 +2,7 @@ export interface Entry {
   name: string;
   mode: string;
   sha1Hash: Buffer;
+  sha1HexHash?: string;
 }
 
 export enum ObjectType {
@@ -26,10 +27,19 @@ export interface DecompressedZlibContent {
 
 export interface DecompressedObject extends DecompressedZlibContent {
   objectType: ObjectType;
-  ref?: Buffer;
+  deltaRef?: Buffer;
 }
 
-export interface gitObjectFile {
+export interface DeltaGitObject {
+  ref: Buffer;
+  instructions: Buffer;
+  type: ObjectType;
+}
+
+export interface GitObjectFile {
   sha1Hash: Buffer;
   fileContent: Buffer;
+  payload: Buffer;
+  type: ObjectType;
+  length: number;
 }
