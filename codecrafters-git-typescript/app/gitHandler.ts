@@ -106,6 +106,7 @@ export class GitHandler {
               ? "100755"
               : "100644",
           sha1Hash: Buffer.from(blobSha1Hash, "hex"),
+          sha1HexHash: blobSha1Hash,
         });
       }
 
@@ -117,6 +118,7 @@ export class GitHandler {
           name: file.name,
           mode: "40000",
           sha1Hash: treeSha1Hash,
+          sha1HexHash: treeSha1Hash.toString("hex"),
         });
       }
     });
@@ -261,15 +263,12 @@ export class GitHandler {
   }
 
   async clone(cloneURL: string, dir: string) {
-    // HANDLE REQUESTS
     const { packHash, ref } = await this.getPackFileHash(cloneURL);
     const res = await this.getPackFileFromServer(cloneURL, packHash);
     const { objects, checksumHash } = await this.getRawGitObjectsContent(
       res.data
     );
 
-    console.log("reference:", ref);
-    console.log("checksum hash:", checksumHash);
     const { gitObjects, deltaObjects } = await this.createGitObjects(objects);
 
     fs.mkdirSync(dir);
@@ -287,8 +286,9 @@ export class GitHandler {
       );
     }
 
-    console.log(deltaObjects);
     this.resolveDeltaObjects(deltaObjects, `${dir}/`);
+    const treeToCheckout = this.findTreeToCheckout(packHash, `${dir}/`);
+    this.writeFilesAndFolders(treeToCheckout, `${dir}/`, `${dir}/`);
   }
 
   async getPackFileHash(
@@ -693,5 +693,49 @@ export class GitHandler {
     }
 
     return value;
+  }
+
+  findTreeToCheckout(sha1Hash: string, basePath: string): string {
+    const commitGitObject = this.readGitObject(sha1Hash, basePath);
+    if (commitGitObject.type !== ObjectType.OBJ_COMMIT) {
+      throw new Error("Not commit object");
+    }
+
+    const treeToCheckout = commitGitObject.payload
+      .toString("utf-8")
+      .split("\n")[0]
+      .split(" ")[1];
+    return treeToCheckout;
+  }
+
+  writeFilesAndFolders(
+    treeSha1Hash: string,
+    path: string,
+    gitDir: string
+  ): void {
+    const treeGitObject = this.readGitObject(treeSha1Hash, gitDir);
+    const entries = this.parseTreeObjectEntries(treeGitObject.payload);
+
+    for (const entry of entries) {
+      // Write blob
+      if (entry.mode === "100644") {
+        const blobGitObject = this.readGitObject(entry.sha1HexHash, gitDir);
+        fs.writeFileSync(
+          `${path}${entry.name}`,
+          new Uint8Array(blobGitObject.payload)
+        );
+      }
+
+      // Write directory
+      else if (entry.mode === "40000") {
+        fs.mkdirSync(`${path}${entry.name}`);
+
+        this.writeFilesAndFolders(
+          entry.sha1HexHash,
+          `${path}${entry.name}/`,
+          gitDir
+        );
+      }
+    }
   }
 }

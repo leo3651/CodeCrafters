@@ -2,7 +2,7 @@ export interface Entry {
   name: string;
   mode: string;
   sha1Hash: Buffer;
-  sha1HexHash?: string;
+  sha1HexHash: string;
 }
 
 export enum ObjectType {

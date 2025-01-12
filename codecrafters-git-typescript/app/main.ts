@@ -67,9 +67,7 @@ switch (command) {
   case Commands.clone:
     const cloneURL = args[1];
     const dir = args[2];
-    gitHandler.clone(cloneURL, dir).then(() => {
-      console.log("FINISHED");
-    });
+    gitHandler.clone(cloneURL, dir);
 
     break;
 
