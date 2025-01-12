@@ -50,6 +50,7 @@ export class GitHandler {
 
     return {
       sha1Hash: this.createSha1HexHash(blobFile),
+      sha1HexHash: this.createSha1HexHash(blobFile).toString("hex"),
       fileContent: blobFile,
       payload: blobContent,
       type: this.getGitObjectType("blob"),
@@ -152,6 +153,7 @@ export class GitHandler {
 
     return {
       sha1Hash: this.createSha1HexHash(treeFile),
+      sha1HexHash: this.createSha1HexHash(treeFile).toString("hex"),
       fileContent: treeFile,
       payload: content,
       type: this.getGitObjectType("tree"),
@@ -193,6 +195,7 @@ export class GitHandler {
 
     return {
       sha1Hash: this.createSha1HexHash(commitFile),
+      sha1HexHash: this.createSha1HexHash(commitFile).toString("hex"),
       fileContent: commitFile,
       payload: commitContent,
       type: this.getGitObjectType("commit"),
@@ -234,6 +237,7 @@ export class GitHandler {
 
     return {
       sha1Hash: Buffer.from(fileSha1Hash, "hex"),
+      sha1HexHash: fileSha1Hash,
       fileContent: decompressedFileContent,
       payload,
       type,
@@ -283,8 +287,8 @@ export class GitHandler {
       );
     }
 
-    this.resolveDeltaObjects(deltaObjects, `${dir}/`);
     console.log(deltaObjects);
+    this.resolveDeltaObjects(deltaObjects, `${dir}/`);
   }
 
   async getPackFileHash(
@@ -451,62 +455,243 @@ export class GitHandler {
     const deltaObjects: DeltaGitObject[] = [];
 
     objects.forEach((object) => {
-      let gitObjectFileContent = Buffer.alloc(0);
-      let gitObjectFileSha1Hash = Buffer.alloc(0);
-
-      // Fill delta objects array
       if (object.objectType === ObjectType.OBJ_REF_DELTA) {
         if (!object.deltaRef) {
-          throw new Error("Delta reference does not exists");
+          throw new Error("Delta object has no reference");
         }
-
-        deltaObjects.push({
-          ref: object.deltaRef,
-          instructions: object.objectContent,
-          type: object.objectType,
-        });
-      }
-
-      // Fill git objects array
-      else {
-        // Commit object
-        if (object.objectType === ObjectType.OBJ_COMMIT) {
-          const { sha1Hash, fileContent } = this.createCommitObject(
-            object.objectContent
-          );
-          gitObjectFileContent = fileContent;
-          gitObjectFileSha1Hash = sha1Hash;
-        }
-
-        // Tree object
-        else if (object.objectType === ObjectType.OBJ_TREE) {
-          const entries = this.parseTreeObjectEntries(object.objectContent);
-          const { sha1Hash, fileContent } = this.createTreeObject(entries);
-          gitObjectFileContent = fileContent;
-          gitObjectFileSha1Hash = sha1Hash;
-        }
-
-        // Blob object
-        else if (object.objectType === ObjectType.OBJ_BLOB) {
-          const { fileContent, sha1Hash } = this.createBlobObject(
-            object.objectContent
-          );
-          gitObjectFileContent = fileContent;
-          gitObjectFileSha1Hash = sha1Hash;
-        }
-
-        gitObjects.push({
-          sha1Hash: gitObjectFileSha1Hash,
-          fileContent: gitObjectFileContent,
-          payload: object.objectContent,
-          type: object.objectType,
-          length: object.objectContent.length,
-        });
+        deltaObjects.push(
+          this.createDeltaGitObject(
+            object.objectContent,
+            object.objectType,
+            object.deltaRef
+          )
+        );
+      } else {
+        gitObjects.push(
+          this.createGitObjectFile(object.objectContent, object.objectType)
+        );
       }
     });
 
     return { gitObjects, deltaObjects };
   }
 
-  resolveDeltaObjects(deltaObjects: DeltaGitObject[], basePath: string) {}
+  createDeltaGitObject(
+    objectContent: Buffer,
+    objectType: ObjectType,
+    deltaRef: Buffer
+  ): DeltaGitObject {
+    return {
+      ref: deltaRef,
+      instructions: objectContent,
+      type: objectType,
+      refHex: deltaRef.toString("hex"),
+    };
+  }
+
+  createGitObjectFile(
+    objectContent: Buffer,
+    objectType: ObjectType
+  ): GitObjectFile {
+    let gitObjectFileContent = Buffer.alloc(0);
+    let gitObjectFileSha1Hash = Buffer.alloc(0);
+
+    // Commit object
+    if (objectType === ObjectType.OBJ_COMMIT) {
+      const { sha1Hash, fileContent } = this.createCommitObject(objectContent);
+      gitObjectFileContent = fileContent;
+      gitObjectFileSha1Hash = sha1Hash;
+    }
+
+    // Tree object
+    else if (objectType === ObjectType.OBJ_TREE) {
+      const entries = this.parseTreeObjectEntries(objectContent);
+      const { sha1Hash, fileContent } = this.createTreeObject(entries);
+      gitObjectFileContent = fileContent;
+      gitObjectFileSha1Hash = sha1Hash;
+    }
+
+    // Blob object
+    else if (objectType === ObjectType.OBJ_BLOB) {
+      const { fileContent, sha1Hash } = this.createBlobObject(objectContent);
+      gitObjectFileContent = fileContent;
+      gitObjectFileSha1Hash = sha1Hash;
+    }
+
+    return {
+      sha1Hash: gitObjectFileSha1Hash,
+      sha1HexHash: gitObjectFileSha1Hash.toString("hex"),
+      fileContent: gitObjectFileContent,
+      payload: objectContent,
+      type: objectType,
+      length: objectContent.length,
+    };
+  }
+
+  resolveDeltaObjects(deltaObjects: DeltaGitObject[], basePath: string): void {
+    const pendingDeltaObjects: DeltaGitObject[] = [];
+
+    for (const deltaObj of deltaObjects) {
+      try {
+        const referencedGitObject = this.readGitObject(
+          deltaObj.ref.toString("hex"),
+          basePath
+        );
+        const appliedDeltaContent = this.applyDeltaInstructions(
+          deltaObj.instructions,
+          referencedGitObject.payload
+        );
+        const resolvedDeltaObject = this.createGitObjectFile(
+          appliedDeltaContent,
+          referencedGitObject.type
+        );
+        this.writeGitObject(
+          resolvedDeltaObject.fileContent,
+          resolvedDeltaObject.sha1Hash.toString("hex"),
+          basePath
+        );
+      } catch (err) {
+        pendingDeltaObjects.push(deltaObj);
+      }
+    }
+
+    if (pendingDeltaObjects.length) {
+      this.resolveDeltaObjects(pendingDeltaObjects, basePath);
+    }
+  }
+
+  applyDeltaInstructions(
+    instructions: Buffer,
+    referencedObjectContent: Buffer
+  ): Buffer {
+    let appliedDeltaContent = Buffer.alloc(0);
+    let i = 0;
+
+    const {
+      size: referencedGitObjectSize,
+      parsedBytes: referencedGitObjectParsedBytes,
+    } = this.parseSize(instructions, i);
+    i += referencedGitObjectParsedBytes;
+
+    const {
+      size: targetGitObjectSize,
+      parsedBytes: targetGitObjectParsedBytes,
+    } = this.parseSize(instructions, i);
+    i += targetGitObjectParsedBytes;
+
+    while (i < instructions.length) {
+      // Copy instruction
+      if (instructions[i] & 0x80) {
+        const { offset, size, parsedBytes } = this.parseCopyInstruction(
+          instructions,
+          i
+        );
+        const copyContent = new Uint8Array(
+          referencedObjectContent.slice(offset, offset + size)
+        );
+        appliedDeltaContent = Buffer.concat([
+          new Uint8Array(appliedDeltaContent),
+          copyContent,
+        ]);
+        i += parsedBytes;
+      }
+
+      // Insert instruction
+      else {
+        const { insertContent, parsedBytes } = this.parseInsertInstruction(
+          instructions,
+          i
+        );
+
+        appliedDeltaContent = Buffer.concat([
+          new Uint8Array(appliedDeltaContent),
+          new Uint8Array(insertContent),
+        ]);
+
+        i += parsedBytes;
+      }
+    }
+
+    return appliedDeltaContent;
+  }
+
+  parseSize(
+    instructions: Buffer,
+    i: number
+  ): { parsedBytes: number; size: number } {
+    let parsedBytes = 1;
+    let size = instructions[i];
+    let offset = 7;
+
+    while (instructions[i] & 0x80) {
+      i++;
+      parsedBytes++;
+      size += (instructions[i] & 0b01111111) << offset;
+      offset += 7;
+    }
+
+    return { parsedBytes, size };
+  }
+
+  parseInsertInstruction(
+    instructions: Buffer,
+    i: number
+  ): { insertContent: Buffer; parsedBytes: number } {
+    const size = instructions[i];
+    i++;
+    const parsedBytes = size + 1;
+
+    const insertContent = instructions.slice(i, i + size);
+    return { insertContent, parsedBytes };
+  }
+
+  parseCopyInstruction(
+    instructions: Buffer,
+    i: number
+  ): { offset: number; size: number; parsedBytes: number } {
+    const sizeArr: number[] = [];
+    const offsetArr: number[] = [];
+    const mask = instructions[i];
+    i++;
+    let parsedBytes = 1;
+
+    for (let n = 0; n < 7; n++) {
+      // Lower 3 bits
+      if (n < 4) {
+        if (mask & (1 << n)) {
+          offsetArr.push(instructions[i]);
+          i++;
+          parsedBytes++;
+        } else {
+          offsetArr.push(0);
+        }
+      }
+
+      // Higher 4 bits
+      else {
+        if (mask & (1 << n)) {
+          sizeArr.push(instructions[i]);
+          i++;
+          parsedBytes++;
+        } else {
+          sizeArr.push(0);
+        }
+      }
+    }
+
+    const size = this.readLittleEndianBytes(sizeArr);
+    const offset = this.readLittleEndianBytes(offsetArr);
+
+    return { offset, size, parsedBytes };
+  }
+
+  readLittleEndianBytes(data: number[]): number {
+    let value = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      value += data[i] << (i * 8);
+    }
+
+    return value;
+  }
 }

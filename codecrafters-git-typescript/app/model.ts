@@ -32,12 +32,14 @@ export interface DecompressedObject extends DecompressedZlibContent {
 
 export interface DeltaGitObject {
   ref: Buffer;
+  refHex: string;
   instructions: Buffer;
   type: ObjectType;
 }
 
 export interface GitObjectFile {
   sha1Hash: Buffer;
+  sha1HexHash: string;
   fileContent: Buffer;
   payload: Buffer;
   type: ObjectType;
