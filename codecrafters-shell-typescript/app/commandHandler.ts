@@ -17,7 +17,7 @@ export const commandHandler: {
     const command = answer.split("type ")[1];
 
     // Built in command
-    if (commandHandler[command]) {
+    if (Object.keys(commandHandler).includes(command)) {
       rl.write(`${command} is a shell builtin\n`);
     }
 
@@ -32,6 +32,23 @@ export const commandHandler: {
       // Not found after all
       if (!exeFile.length) {
         rl.write(`${command}: not found\n`);
+      }
+    }
+  },
+
+  pwd(rl: Interface, answer: string) {
+    rl.write(`${process.cwd()}\n`);
+  },
+
+  cd(rl: Interface, answer: string) {
+    const path = answer.split(" ")[1];
+    if (path === "~" && process.env.HOME) {
+      process.chdir(process.env.HOME);
+    } else {
+      try {
+        process.chdir(path);
+      } catch (err: any) {
+        rl.write(`cd: ${path}: ${err.message}\n`);
       }
     }
   },

@@ -13,7 +13,7 @@ function question() {
   rl.question("$ ", (answer: string) => {
     const command = answer.split(" ")[0];
 
-    if (commandHandler[command]) {
+    if (Object.keys(commandHandler).includes(command)) {
       commandHandler[command](rl, answer);
     }
 
