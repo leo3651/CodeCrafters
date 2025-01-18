@@ -1,6 +1,14 @@
 import { Interface } from "readline";
 import fs from "fs";
 
+const builtinCommands: { [key: string]: boolean } = {
+  exit: true,
+  echo: true,
+  type: true,
+  pwd: true,
+  cd: true,
+};
+
 export const commandHandler: {
   [key: string]: (rl: Interface, answer: string) => void;
 } = {
@@ -9,15 +17,34 @@ export const commandHandler: {
   },
 
   echo: (rl: Interface, answer: string): void => {
-    const textBack = answer.split("echo ")[1];
+    let textBack = answer.split("echo ")[1];
+    textBack = parseArgs(textBack);
     rl.write(`${textBack}\n`);
+  },
+
+  cat: (rl: Interface, answer: string): void => {
+    const filesString = answer.split("cat ")[1];
+
+    const filesArr = filesString
+      .split(filesString[0])
+      .filter((word) => word.trim() !== "");
+
+    const content = filesArr.map((file) => {
+      try {
+        return fs.readFileSync(file).toString("utf-8");
+      } catch (err) {
+        throw new Error("File does not exist");
+      }
+    });
+
+    rl.write(`${content.join("")}`);
   },
 
   type: (rl: Interface, answer: string): void => {
     const command = answer.split("type ")[1];
 
     // Built in command
-    if (Object.keys(commandHandler).includes(command)) {
+    if (builtinCommands[command]) {
       rl.write(`${command} is a shell builtin\n`);
     }
 
@@ -82,4 +109,31 @@ export function checkForExeFile(command: string): string[] {
   }
 
   return exeFile;
+}
+
+function parseArgs(str: string) {
+  if (
+    (str[0] === "'" && str[str.length - 1] === "'") ||
+    (str[0] === '"' && str[str.length - 1] === '"')
+  ) {
+    return str
+      .split(str[0])
+      .filter((word) => word !== "")
+      .map((word) => {
+        let i = 0;
+        while (i < word.length) {
+          if (word[i] !== " ") {
+            return word;
+          }
+          i++;
+        }
+        return " ";
+      })
+      .join("");
+  } else {
+    return str
+      .split(" ")
+      .filter((word) => word !== "")
+      .join(" ");
+  }
 }
