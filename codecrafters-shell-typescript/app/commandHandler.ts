@@ -18,7 +18,7 @@ export const commandHandler: {
 
   echo: (rl: Interface, answer: string): void => {
     let textBack = answer.split("echo ")[1];
-    textBack = parseArgs(textBack);
+    textBack = handleEchoCommand(textBack);
     rl.write(`${textBack}\n`);
   },
 
@@ -63,11 +63,11 @@ export const commandHandler: {
     }
   },
 
-  pwd(rl: Interface, answer: string) {
+  pwd: (rl: Interface, answer: string): void => {
     rl.write(`${process.cwd()}\n`);
   },
 
-  cd(rl: Interface, answer: string) {
+  cd: (rl: Interface, answer: string): void => {
     const path = answer.split(" ")[1];
     if (path === "~" && process.env.HOME) {
       process.chdir(process.env.HOME);
@@ -111,29 +111,98 @@ export function checkForExeFile(command: string): string[] {
   return exeFile;
 }
 
-function parseArgs(str: string) {
-  if (
-    (str[0] === "'" && str[str.length - 1] === "'") ||
-    (str[0] === '"' && str[str.length - 1] === '"')
-  ) {
-    return str
-      .split(str[0])
-      .filter((word) => word !== "")
-      .map((word) => {
-        let i = 0;
-        while (i < word.length) {
-          if (word[i] !== " ") {
-            return word;
-          }
+function handleEchoCommand(str: string) {
+  let i = 0;
+  let finalString: string = "";
+
+  while (i < str.length) {
+    // Handle double quotes
+    if (
+      (str[i] === '"' && i - 1 >= 0 && str[i - 1] !== "\\") ||
+      (i === 0 && str[i] === '"')
+    ) {
+      let insideDoubleQuotesStr: string[] = [];
+      i++;
+
+      while (true) {
+        if (str[i] === '"' && i - 1 >= 0 && str[i - 1] !== "\\") {
+          break;
+        }
+
+        if (i === str.length - 1 && str[i] === '"' && str[i - 1] === "\\") {
+          break;
+        }
+
+        if (str[i] === "\\") {
+          insideDoubleQuotesStr.push(str[i + 1]);
+          i++;
+        } else {
+          insideDoubleQuotesStr.push(str[i]);
+        }
+        i++;
+      }
+
+      finalString += insideDoubleQuotesStr.join("");
+    }
+
+    // Handle single quotes
+    else if (str[i] === "'") {
+      i++;
+      let start = i;
+
+      while (str[i] !== "'") {
+        i++;
+      }
+
+      finalString += str.slice(start, i);
+    }
+
+    // Handle space char
+    else if (str[i] === " ") {
+      if (finalString[finalString.length - 1] !== " ") {
+        finalString += " ";
+      }
+    }
+
+    // Handle other letters
+    else {
+      const outsideQuotesStr: string[] = [];
+
+      while (true) {
+        if (i > str.length - 1) {
+          break;
+        }
+
+        //
+        else if (str[i] === "\\") {
+          outsideQuotesStr.push(str[i + 1]);
           i++;
         }
-        return " ";
-      })
-      .join("");
-  } else {
-    return str
-      .split(" ")
-      .filter((word) => word !== "")
-      .join(" ");
+
+        //
+        else if (str[i] === " ") {
+          outsideQuotesStr.push(str[i]);
+          break;
+        }
+
+        //
+        else if (str[i] === "'" || str[i] === '"') {
+          i--;
+          break;
+        }
+
+        //
+        else {
+          outsideQuotesStr.push(str[i]);
+        }
+        i++;
+      }
+
+      finalString += outsideQuotesStr.join("");
+    }
+
+    i++;
   }
+
+  return finalString;
 }

@@ -9,7 +9,7 @@ const rl = createInterface({
 
 question();
 
-function question() {
+function question(): void {
   rl.question("$ ", (answer: string) => {
     const command = answer.split(" ")[0];
 
