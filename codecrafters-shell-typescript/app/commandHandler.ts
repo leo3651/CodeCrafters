@@ -1,5 +1,6 @@
 import { Interface } from "readline";
 import fs from "fs";
+import { execFileSync } from "node:child_process";
 
 const builtinCommands: { [key: string]: boolean } = {
   exit: true,
@@ -10,42 +11,62 @@ const builtinCommands: { [key: string]: boolean } = {
 };
 
 export const commandHandler: {
-  [key: string]: (rl: Interface, answer: string) => void;
+  [key: string]: (
+    rl: Interface,
+    answer: string,
+    writeToTerminal: boolean
+  ) => void | string;
 } = {
   exit: (_: Interface, __: string): void => {
     process.exit(0);
   },
 
-  echo: (rl: Interface, answer: string): void => {
+  echo: (rl: Interface, answer: string, writeToTerminal: boolean): string => {
     let textBack = answer.split("echo ")[1];
     textBack = handleEchoCommand(textBack);
-    rl.write(`${textBack}\n`);
+
+    if (writeToTerminal) {
+      rl.write(`${textBack}\n`);
+    }
+    return `${textBack}\n`;
   },
 
-  cat: (rl: Interface, answer: string): void => {
+  cat: (rl: Interface, answer: string, writeToTerminal: boolean): string => {
     const filesString = answer.split("cat ")[1];
+    let filesArr: string[] = [];
 
-    const filesArr = filesString
-      .split(filesString[0])
-      .filter((word) => word.trim() !== "");
+    if (answer.includes("'") || answer.includes('"')) {
+      filesArr = filesString
+        .split(filesString[0])
+        .filter((word) => word.trim() !== "");
+    } else {
+      filesArr = filesString.split(" ").filter((word) => word.trim() !== "");
+    }
 
     const content = filesArr.map((file) => {
       try {
         return fs.readFileSync(file).toString("utf-8");
       } catch (err) {
-        throw new Error("File does not exist");
+        rl.write(`cat: ${file}: No such file or directory\n`);
       }
     });
 
-    rl.write(`${content.join("")}`);
+    if (writeToTerminal) {
+      rl.write(`${content.join("")}`);
+    }
+    return content.join("");
   },
 
-  type: (rl: Interface, answer: string): void => {
+  type: (rl: Interface, answer: string, writeToTerminal: boolean): string => {
     const command = answer.split("type ")[1];
+    let output = "";
 
     // Built in command
     if (builtinCommands[command]) {
-      rl.write(`${command} is a shell builtin\n`);
+      output = `${command} is a shell builtin\n`;
+      if (writeToTerminal) {
+        rl.write(output);
+      }
     }
 
     // Check for built in executable
@@ -53,18 +74,30 @@ export const commandHandler: {
       const exeFile = checkForExeFile(command);
 
       if (exeFile.length) {
-        rl.write(`${command} is ${exeFile[0]}/${exeFile[1]}\n`);
+        output = `${command} is ${exeFile[0]}/${exeFile[1]}\n`;
+        if (writeToTerminal) {
+          rl.write(output);
+        }
       }
 
       // Not found after all
       if (!exeFile.length) {
-        rl.write(`${command}: not found\n`);
+        output = `${command}: not found\n`;
+        if (writeToTerminal) {
+          rl.write(output);
+        }
       }
     }
+
+    return output;
   },
 
-  pwd: (rl: Interface, answer: string): void => {
-    rl.write(`${process.cwd()}\n`);
+  pwd: (rl: Interface, _: string, writeToTerminal: boolean): string => {
+    const output = `${process.cwd()}\n`;
+    if (writeToTerminal) {
+      rl.write(output);
+    }
+    return output;
   },
 
   cd: (rl: Interface, answer: string): void => {
@@ -81,7 +114,7 @@ export const commandHandler: {
   },
 };
 
-export function checkForExeFile(command: string): string[] {
+function checkForExeFile(command: string): string[] {
   const exeFile: string[] = [];
 
   if (!process.env.PATH) {
@@ -111,7 +144,7 @@ export function checkForExeFile(command: string): string[] {
   return exeFile;
 }
 
-function handleEchoCommand(str: string) {
+export function handleEchoCommand(str: string): string {
   let i = 0;
   let finalString: string = "";
 
@@ -164,7 +197,7 @@ function handleEchoCommand(str: string) {
       }
     }
 
-    // Handle other letters
+    // Handle unquoted strings
     else {
       const outsideQuotesStr: string[] = [];
 
@@ -173,25 +206,25 @@ function handleEchoCommand(str: string) {
           break;
         }
 
-        //
+        // Handle backslash
         else if (str[i] === "\\") {
           outsideQuotesStr.push(str[i + 1]);
           i++;
         }
 
-        //
+        // Handle space
         else if (str[i] === " ") {
           outsideQuotesStr.push(str[i]);
           break;
         }
 
-        //
+        // Handle quotes
         else if (str[i] === "'" || str[i] === '"') {
           i--;
           break;
         }
 
-        //
+        // Building the word
         else {
           outsideQuotesStr.push(str[i]);
         }
@@ -205,4 +238,48 @@ function handleEchoCommand(str: string) {
   }
 
   return finalString;
+}
+
+export function isRedirectCommand(answer: string, rl: Interface): boolean {
+  if (answer.includes(" > ") || answer.includes(" 1> ")) {
+    const [command, file] = answer.split(
+      answer.includes(" 1> ") ? " 1> " : " > "
+    );
+    const commandName = command.split(" ")[0];
+
+    if (Object.keys(commandHandler).includes(commandName)) {
+      const content = commandHandler[commandName](rl, command, false);
+      if (content) {
+        fs.writeFileSync(file, content);
+      }
+    } else {
+      const buf = executeProgramIfPossible(command);
+      if (buf) {
+        fs.writeFileSync(file, buf.toString("utf-8"));
+      }
+    }
+
+    return true;
+  }
+  return false;
+}
+
+export function executeProgramIfPossible(answer: string): Buffer | null {
+  let command = "";
+  let args: string[] = [];
+
+  if (answer.includes('"') || answer.includes("'")) {
+    [command, ...args] = answer.split(`${answer[0]} `);
+    command = command.slice(1);
+  } else {
+    [command, ...args] = answer.split(" ");
+  }
+
+  const exeFile = checkForExeFile(command);
+  if (exeFile.length) {
+    const buf = execFileSync(command, args);
+    return buf;
+  }
+
+  return null;
 }

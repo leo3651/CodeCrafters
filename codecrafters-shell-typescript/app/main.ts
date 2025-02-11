@@ -1,6 +1,9 @@
 import { createInterface } from "readline";
-import { execFileSync } from "node:child_process";
-import { checkForExeFile, commandHandler } from "./commandHandler";
+import {
+  commandHandler,
+  executeProgramIfPossible,
+  isRedirectCommand,
+} from "./commandHandler";
 
 const rl = createInterface({
   input: process.stdin,
@@ -13,29 +16,25 @@ function question(): void {
   rl.question("$ ", (answer: string) => {
     const command = answer.split(" ")[0];
 
-    if (Object.keys(commandHandler).includes(command)) {
-      commandHandler[command](rl, answer);
+    if (isRedirectCommand(answer, rl)) {
+    }
+
+    // Built in command
+    else if (Object.keys(commandHandler).includes(command)) {
+      commandHandler[command](rl, answer, true);
     }
 
     // Command not found || execute program
     else {
-      const fileExecuted = executeProgramIfPossible(answer);
-      if (!fileExecuted) {
+      const buffer = executeProgramIfPossible(answer);
+
+      if (buffer) {
+        rl.write(buffer.toString("utf-8"));
+      } else {
         rl.write(`${answer}: command not found\n`);
       }
     }
 
     question();
   });
-}
-
-function executeProgramIfPossible(answer: string): boolean {
-  const [command, ...args] = answer.split(" ");
-  const exeFile = checkForExeFile(command);
-  if (exeFile.length) {
-    const buf = execFileSync(command, args);
-    rl.write(buf.toString("utf-8"));
-    return true;
-  }
-  return false;
 }
