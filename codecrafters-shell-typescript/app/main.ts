@@ -21,7 +21,7 @@ function question(): void {
 
     // Built in command
     else if (Object.keys(commandHandler).includes(command)) {
-      commandHandler[command](rl, answer, true);
+      commandHandler[command](rl, answer, true, false);
     }
 
     // Command not found || execute program

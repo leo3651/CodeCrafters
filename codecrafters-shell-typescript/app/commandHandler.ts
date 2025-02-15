@@ -14,26 +14,43 @@ export const commandHandler: {
   [key: string]: (
     rl: Interface,
     answer: string,
-    writeToTerminal: boolean
+    writeToTerminal: boolean,
+    returnError: boolean
   ) => void | string;
 } = {
   exit: (_: Interface, __: string): void => {
     process.exit(0);
   },
 
-  echo: (rl: Interface, answer: string, writeToTerminal: boolean): string => {
+  echo: (
+    rl: Interface,
+    answer: string,
+    writeToTerminal: boolean,
+    returnError: boolean
+  ): string => {
     let textBack = answer.split("echo ")[1];
     textBack = handleEchoCommand(textBack);
 
     if (writeToTerminal) {
       rl.write(`${textBack}\n`);
     }
+
+    if (returnError) {
+      return "";
+    }
+
     return `${textBack}\n`;
   },
 
-  cat: (rl: Interface, answer: string, writeToTerminal: boolean): string => {
+  cat: (
+    rl: Interface,
+    answer: string,
+    writeToTerminal: boolean,
+    returnError: boolean
+  ): string => {
     const filesString = answer.split("cat ")[1];
     let filesArr: string[] = [];
+    let error = "";
 
     if (answer.includes("'") || answer.includes('"')) {
       filesArr = filesString
@@ -47,13 +64,21 @@ export const commandHandler: {
       try {
         return fs.readFileSync(file).toString("utf-8");
       } catch (err) {
-        rl.write(`cat: ${file}: No such file or directory\n`);
+        if (!returnError) {
+          rl.write(`cat: ${file}: No such file or directory\n`);
+        }
+        error += `cat: ${file}: No such file or directory\n`;
       }
     });
 
     if (writeToTerminal) {
       rl.write(`${content.join("")}`);
     }
+
+    if (returnError) {
+      return error;
+    }
+
     return content.join("");
   },
 
@@ -142,6 +167,37 @@ function checkForExeFile(command: string): string[] {
   }
 
   return exeFile;
+}
+
+export function executeProgramIfPossible(answer: string): Buffer | null {
+  let command = "";
+  let args: string[] = [];
+
+  if (answer.includes('"') || answer.includes("'")) {
+    [command, ...args] = answer.split(`${answer[0]} `);
+    command = command.slice(1);
+  } else {
+    [command, ...args] = answer.split(" ");
+  }
+
+  const exeFile = checkForExeFile(command);
+  let buf: Buffer;
+
+  if (exeFile.length) {
+    try {
+      buf = Buffer.from(
+        execFileSync(command, args, {
+          stdio: ["pipe", "pipe", "pipe"], // capture all I/O so nothing prints automatically
+          encoding: "utf8",
+        })
+      );
+    } catch (err: any) {
+      buf = Buffer.from(err.message);
+    }
+    return buf;
+  }
+
+  return null;
 }
 
 export function handleEchoCommand(str: string): string {
@@ -241,45 +297,48 @@ export function handleEchoCommand(str: string): string {
 }
 
 export function isRedirectCommand(answer: string, rl: Interface): boolean {
-  if (answer.includes(" > ") || answer.includes(" 1> ")) {
+  if (
+    answer.includes(" > ") ||
+    answer.includes(" 1> ") ||
+    answer.includes(" 2> ") ||
+    answer.includes(" 1>> ") ||
+    answer.includes(" >> ")
+  ) {
     const [command, file] = answer.split(
-      answer.includes(" 1> ") ? " 1> " : " > "
+      answer.includes(" 1> ")
+        ? " 1> "
+        : answer.includes(" 2> ")
+        ? " 2> "
+        : answer.includes(" >> ")
+        ? " >> "
+        : answer.includes(" > ")
+        ? " > "
+        : " 1>> "
     );
     const commandName = command.split(" ")[0];
 
     if (Object.keys(commandHandler).includes(commandName)) {
-      const content = commandHandler[commandName](rl, command, false);
-      if (content) {
-        fs.writeFileSync(file, content);
+      const content = commandHandler[commandName](
+        rl,
+        command,
+        answer.includes(" 2> ") ? true : false,
+        answer.includes(" 2> ") ? true : false
+      );
+      if (content !== null && content !== undefined) {
+        fs.writeFileSync(file, content, {
+          flag: answer.includes(" 1>> ") || answer.includes(" >> ") ? "a" : "w",
+        });
       }
     } else {
       const buf = executeProgramIfPossible(command);
       if (buf) {
-        fs.writeFileSync(file, buf.toString("utf-8"));
+        fs.writeFileSync(file, buf.toString("utf-8"), {
+          flag: answer.includes(" 1>> ") || answer.includes(" >> ") ? "a" : "w",
+        });
       }
     }
 
     return true;
   }
   return false;
-}
-
-export function executeProgramIfPossible(answer: string): Buffer | null {
-  let command = "";
-  let args: string[] = [];
-
-  if (answer.includes('"') || answer.includes("'")) {
-    [command, ...args] = answer.split(`${answer[0]} `);
-    command = command.slice(1);
-  } else {
-    [command, ...args] = answer.split(" ");
-  }
-
-  const exeFile = checkForExeFile(command);
-  if (exeFile.length) {
-    const buf = execFileSync(command, args);
-    return buf;
-  }
-
-  return null;
 }
