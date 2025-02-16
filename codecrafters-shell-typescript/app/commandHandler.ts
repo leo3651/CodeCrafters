@@ -169,7 +169,11 @@ function checkForExeFile(command: string): string[] {
   return exeFile;
 }
 
-export function executeProgramIfPossible(answer: string): Buffer | null {
+export function executeProgramIfPossible(
+  answer: string,
+  returnError: boolean,
+  rl: Interface
+): Buffer | null {
   let command = "";
   let args: string[] = [];
 
@@ -192,7 +196,12 @@ export function executeProgramIfPossible(answer: string): Buffer | null {
         })
       );
     } catch (err: any) {
-      buf = Buffer.from(err.message);
+      if (returnError) {
+        buf = Buffer.from(err.message);
+      } else {
+        buf = Buffer.from("");
+        rl.write(err.message);
+      }
     }
     return buf;
   }
@@ -296,49 +305,67 @@ export function handleEchoCommand(str: string): string {
   return finalString;
 }
 
-export function isRedirectCommand(answer: string, rl: Interface): boolean {
-  if (
+export function handleRedirectCommand(answer: string, rl: Interface): void {
+  const [command, file] = answer.split(
+    answer.includes(" 1> ")
+      ? " 1> "
+      : answer.includes(" > ")
+      ? " > "
+      : answer.includes(" 2> ")
+      ? " 2> "
+      : answer.includes(" >> ")
+      ? " >> "
+      : answer.includes(" 1>> ")
+      ? " 1>> "
+      : " 2>> "
+  );
+  const commandName = command.split(" ")[0];
+
+  if (Object.keys(commandHandler).includes(commandName)) {
+    const content = commandHandler[commandName](
+      rl,
+      command,
+      answer.includes(" 2> ") || answer.includes(" 2>> ") ? true : false,
+      answer.includes(" 2> ") || answer.includes(" 2>> ") ? true : false
+    );
+
+    if (content !== null && content !== undefined) {
+      fs.writeFileSync(file, content, {
+        flag:
+          answer.includes(" 1>> ") ||
+          answer.includes(" >> ") ||
+          answer.includes(" 2>> ")
+            ? "a"
+            : "w",
+      });
+    }
+  } else {
+    const buf = executeProgramIfPossible(
+      command,
+      answer.includes(" 2> ") || answer.includes(" 2>> ") ? true : false,
+      rl
+    );
+
+    if (buf) {
+      fs.writeFileSync(file, buf.toString("utf-8"), {
+        flag:
+          answer.includes(" 1>> ") ||
+          answer.includes(" >> ") ||
+          answer.includes(" 2>> ")
+            ? "a"
+            : "w",
+      });
+    }
+  }
+}
+
+export function isRedirectCommand(answer: string) {
+  return (
     answer.includes(" > ") ||
     answer.includes(" 1> ") ||
     answer.includes(" 2> ") ||
     answer.includes(" 1>> ") ||
-    answer.includes(" >> ")
-  ) {
-    const [command, file] = answer.split(
-      answer.includes(" 1> ")
-        ? " 1> "
-        : answer.includes(" 2> ")
-        ? " 2> "
-        : answer.includes(" >> ")
-        ? " >> "
-        : answer.includes(" > ")
-        ? " > "
-        : " 1>> "
-    );
-    const commandName = command.split(" ")[0];
-
-    if (Object.keys(commandHandler).includes(commandName)) {
-      const content = commandHandler[commandName](
-        rl,
-        command,
-        answer.includes(" 2> ") ? true : false,
-        answer.includes(" 2> ") ? true : false
-      );
-      if (content !== null && content !== undefined) {
-        fs.writeFileSync(file, content, {
-          flag: answer.includes(" 1>> ") || answer.includes(" >> ") ? "a" : "w",
-        });
-      }
-    } else {
-      const buf = executeProgramIfPossible(command);
-      if (buf) {
-        fs.writeFileSync(file, buf.toString("utf-8"), {
-          flag: answer.includes(" 1>> ") || answer.includes(" >> ") ? "a" : "w",
-        });
-      }
-    }
-
-    return true;
-  }
-  return false;
+    answer.includes(" >> ") ||
+    answer.includes(" 2>> ")
+  );
 }

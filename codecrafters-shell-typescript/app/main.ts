@@ -2,6 +2,7 @@ import { createInterface } from "readline";
 import {
   commandHandler,
   executeProgramIfPossible,
+  handleRedirectCommand,
   isRedirectCommand,
 } from "./commandHandler";
 
@@ -16,7 +17,9 @@ function question(): void {
   rl.question("$ ", (answer: string) => {
     const command = answer.split(" ")[0];
 
-    if (isRedirectCommand(answer, rl)) {
+    // Redirect command
+    if (isRedirectCommand(answer)) {
+      handleRedirectCommand(answer, rl);
     }
 
     // Built in command
@@ -26,7 +29,7 @@ function question(): void {
 
     // Command not found || execute program
     else {
-      const buffer = executeProgramIfPossible(answer);
+      const buffer = executeProgramIfPossible(answer, true, rl);
 
       if (buffer) {
         rl.write(buffer.toString("utf-8"));
