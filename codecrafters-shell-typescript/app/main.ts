@@ -10,6 +10,7 @@ import fs from "fs";
 const AUDIO_CODE = "\u0007";
 const MOVE_TO_LINE_END = { ctrl: true, name: "e" };
 const CLEAR_CURRENT_LINE = { ctrl: true, name: "u" };
+let previousPrompt = "";
 
 const rl = createInterface({
   input: process.stdin,
@@ -50,6 +51,7 @@ function question(): void {
 process.stdin.on("keypress", (_, key) => {
   if (key.sequence === "\t") {
     const completions = ["echo", "exit"];
+    const line = rl.line.replaceAll("\t", "");
 
     const envPaths = process.env.PATH?.split(":");
     const eligiblePaths: string[] =
@@ -58,20 +60,16 @@ process.stdin.on("keypress", (_, key) => {
           try {
             return fs
               .readdirSync(path)
-              .filter((fileName) =>
-                fileName.startsWith(rl.line.replaceAll("\t", ""))
-              );
+              .filter((fileName) => fileName.startsWith(line));
           } catch (err) {
             return [];
           }
         })
         .filter((file) => file !== undefined && file !== null) || [];
 
-    let hits = completions.filter((c) =>
-      c.startsWith(rl.line.replaceAll("\t", ""))
-    );
+    const builtinHits = completions.filter((c) => c.startsWith(line));
 
-    hits = [...new Set([...hits, ...eligiblePaths])];
+    const hits = [...new Set([...builtinHits, ...eligiblePaths])];
     // console.log("hits", hits);
     // console.log("line", [rl.line]);
 
@@ -81,8 +79,18 @@ process.stdin.on("keypress", (_, key) => {
       rl.write(hits[0] + " ");
     } else if (hits.length > 1) {
       // console.log("HITSSS");
-      process.stdout.write(`\n${completions.join(" ")}\n`);
-      process.stdout.write("\r$ " + rl.line.replaceAll("\t", ""));
+      if (!builtinHits.length && eligiblePaths.length) {
+        if (previousPrompt !== line) {
+          previousPrompt = line;
+          process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
+        } else {
+          process.stdout.write(`\n${hits.sort().join("  ")}\n`);
+          process.stdout.write("\r$ " + line);
+        }
+      } else {
+        process.stdout.write(`\n${hits.sort().join("  ")}\n`);
+        process.stdout.write("\r$ " + line);
+      }
     } else {
       // console.log("AUDIO");
       process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
