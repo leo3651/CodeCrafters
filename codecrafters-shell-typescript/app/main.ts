@@ -8,7 +8,6 @@ import {
 import fs from "fs";
 
 const AUDIO_CODE = "\u0007";
-const MOVE_TO_LINE_END = { ctrl: true, name: "e" };
 const CLEAR_CURRENT_LINE = { ctrl: true, name: "u" };
 let previousPrompt = "";
 
@@ -49,10 +48,12 @@ function question(): void {
 }
 
 process.stdin.on("keypress", (_, key) => {
+  // On TAB
   if (key.sequence === "\t") {
     const completions = ["echo", "exit"];
     const line = rl.line.replaceAll("\t", "");
 
+    // Add environment commands hits
     const envPaths = process.env.PATH?.split(":");
     const eligiblePaths: string[] =
       envPaths
@@ -67,32 +68,51 @@ process.stdin.on("keypress", (_, key) => {
         })
         .filter((file) => file !== undefined && file !== null) || [];
 
+    // Add builtin commands hits
     const builtinHits = completions.filter((c) => c.startsWith(line));
 
     const hits = [...new Set([...builtinHits, ...eligiblePaths])];
-    // console.log("hits", hits);
-    // console.log("line", [rl.line]);
 
+    // Only one hit found
     if (hits.length === 1) {
-      // console.log("ONE HIT");
       rl.write(null, CLEAR_CURRENT_LINE);
       rl.write(hits[0] + " ");
-    } else if (hits.length > 1) {
-      // console.log("HITSSS");
+    }
+
+    // Multiple hits found
+    else if (hits.length > 1) {
+      // Only environmental commands found
       if (!builtinHits.length && eligiblePaths.length) {
-        if (previousPrompt !== line) {
-          previousPrompt = line;
-          process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
-        } else {
-          process.stdout.write(`\n${hits.sort().join("  ")}\n`);
-          process.stdout.write("\r$ " + line);
+        // All hits have same prefixes
+        if (allPathsWithSamePrefixes(hits, line)) {
+          hits.sort();
+          rl.write(null, CLEAR_CURRENT_LINE);
+          rl.write(hits[0]);
         }
-      } else {
+
+        // Hits DON'T have same prefixes
+        else {
+          // First ring the bell then on second TAB write all commands to the terminal
+          if (previousPrompt !== line) {
+            previousPrompt = line;
+            process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
+          } else {
+            process.stdout.write(`\n${hits.sort().join("  ")}\n`);
+            process.stdout.write("\r$ " + line);
+          }
+        }
+      }
+
+      // Environmental commands and builtin commands found. Write all to the terminal
+      else {
         process.stdout.write(`\n${hits.sort().join("  ")}\n`);
         process.stdout.write("\r$ " + line);
       }
-    } else {
-      // console.log("AUDIO");
+    }
+
+    // No hit found
+    else {
+      // Ring the bell
       process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
     }
   }
@@ -102,3 +122,23 @@ process.stdin.on("keypress", (_, key) => {
     process.exit();
   }
 });
+
+function allPathsWithSamePrefixes(hits: string[], line: string): boolean {
+  if (hits.every((hit) => hit.includes(line))) {
+    const shallowCopyHits = [...hits];
+    shallowCopyHits.sort();
+
+    for (let i = 0; i < shallowCopyHits.length; i++) {
+      if (
+        !shallowCopyHits[shallowCopyHits.length - 1].includes(
+          shallowCopyHits[i]
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
