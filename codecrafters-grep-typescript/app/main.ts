@@ -51,6 +51,11 @@ function matchPattern(inputLine: string, pattern: string): boolean {
     return startOfStringAnchor(inputLine, pattern);
   }
 
+  // End of string anchor
+  else if (pattern.endsWith("$")) {
+    return endOfStringAnchor(inputLine, pattern);
+  }
+
   // Combining character classes
   else {
     return combiningCharClasses(inputLine, pattern);
@@ -85,41 +90,78 @@ function matchAlphanumericChars(inputLine: string): boolean {
 }
 
 function combiningCharClasses(inputLine: string, pattern: string): boolean {
-  for (let i = 0; i < inputLine.length; i++) {
-    for (
-      let patternIndex = 0, inputLineIndex = 0;
-      patternIndex < pattern.length;
-      patternIndex++, inputLineIndex++
-    ) {
-      if (pattern[patternIndex] === "\\") {
-        patternIndex++;
+  if (
+    pattern.includes("\\d") ||
+    pattern.includes("\\w") ||
+    pattern.includes("+")
+  ) {
+    for (let i = 0; i < inputLine.length; i++) {
+      for (
+        let patternIndex = 0, inputLineIndex = 0;
+        patternIndex < pattern.length;
+        patternIndex++, inputLineIndex++
+      ) {
+        // Backslash \\
+        if (pattern[patternIndex] === "\\") {
+          patternIndex++;
 
-        if (
-          pattern[patternIndex] === "d" &&
-          !matchAnyDigit(inputLine[i + inputLineIndex])
+          // \d || \w
+          if (
+            pattern[patternIndex] === "d" &&
+            !matchAnyDigit(inputLine[i + inputLineIndex])
+          ) {
+            break;
+          } else if (
+            pattern[patternIndex] === "w" &&
+            !matchAlphanumericChars(inputLine[i + inputLineIndex])
+          ) {
+            break;
+          }
+        }
+
+        // Match one or more times
+        else if (
+          pattern[patternIndex + 1] === "+" &&
+          inputLine[i + inputLineIndex] === pattern[patternIndex]
         ) {
-          break;
-        } else if (
-          pattern[patternIndex] === "w" &&
-          !matchAlphanumericChars(inputLine[i + inputLineIndex])
-        ) {
+          while (inputLine[i + inputLineIndex] === pattern[patternIndex]) {
+            i++;
+          }
+          patternIndex++;
+          i--;
+        }
+
+        // Compare chars (break if not equal)
+        else if (inputLine[i + inputLineIndex] !== pattern[patternIndex]) {
           break;
         }
-      } else if (inputLine[i + inputLineIndex] !== pattern[patternIndex]) {
-        break;
-      }
 
-      if (patternIndex === pattern.length - 1) {
-        return true;
+        // Input line matches pattern
+        if (patternIndex === pattern.length - 1) {
+          return true;
+        }
       }
     }
+    return false;
   }
-
-  return false;
+  return true;
 }
 
 function startOfStringAnchor(inputLine: string, pattern: string): boolean {
   if (inputLine.indexOf(pattern.slice(1)) !== 0) {
+    return false;
+  }
+  return true;
+}
+
+function endOfStringAnchor(inputLine: string, pattern: string): boolean {
+  const inputLineWords = inputLine.split(" ");
+  const patternWords = pattern.slice(0, -1).split(" ");
+
+  if (
+    patternWords[patternWords.length - 1] !==
+    inputLineWords[inputLineWords.length - 1]
+  ) {
     return false;
   }
   return true;
