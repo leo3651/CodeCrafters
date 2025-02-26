@@ -46,7 +46,12 @@ function matchPattern(inputLine: string, pattern: string): boolean {
     return charsArr.some((char) => inputLine.includes(char));
   }
 
-  // Unhandled pattern
+  // Start of string anchor
+  else if (pattern.startsWith("^")) {
+    return startOfStringAnchor(inputLine, pattern);
+  }
+
+  // Combining character classes
   else {
     return combiningCharClasses(inputLine, pattern);
   }
@@ -65,7 +70,7 @@ function matchAnyDigit(inputLine: string): boolean {
   return false;
 }
 
-function matchAlphanumericChars(inputLine: string) {
+function matchAlphanumericChars(inputLine: string): boolean {
   for (let i = 0; i < inputLine.length; i++) {
     if (
       (inputLine[i].charCodeAt(0) >= 48 && inputLine[i].charCodeAt(0) <= 57) ||
@@ -79,7 +84,7 @@ function matchAlphanumericChars(inputLine: string) {
   return false;
 }
 
-function combiningCharClasses(inputLine: string, pattern: string) {
+function combiningCharClasses(inputLine: string, pattern: string): boolean {
   for (let i = 0; i < inputLine.length; i++) {
     for (
       let patternIndex = 0, inputLineIndex = 0;
@@ -111,4 +116,11 @@ function combiningCharClasses(inputLine: string, pattern: string) {
   }
 
   return false;
+}
+
+function startOfStringAnchor(inputLine: string, pattern: string): boolean {
+  if (inputLine.indexOf(pattern.slice(1)) !== 0) {
+    return false;
+  }
+  return true;
 }
