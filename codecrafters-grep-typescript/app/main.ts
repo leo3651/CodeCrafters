@@ -138,17 +138,34 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
       // Match one or more times
       else if (
         pattern[patternIndex + 1] === "+" &&
-        inputLine[i + inputLineIndex] === pattern[patternIndex]
+        (inputLine[i + inputLineIndex] === pattern[patternIndex] ||
+          pattern[patternIndex] === ".")
       ) {
-        while (inputLine[i + inputLineIndex] === pattern[patternIndex]) {
+        let breakLoop = false;
+        const originalIndex = i;
+
+        while (inputLine[i + inputLineIndex] !== pattern[patternIndex + 2]) {
           i++;
+          if (i > inputLine.length - 1) {
+            breakLoop = true;
+            break;
+          }
         }
+
+        if (breakLoop) {
+          i = originalIndex;
+          break;
+        }
+
         patternIndex++;
         i--;
       }
 
       // Compare chars (break if not equal)
-      else if (inputLine[i + inputLineIndex] !== pattern[patternIndex]) {
+      else if (
+        inputLine[i + inputLineIndex] !== pattern[patternIndex] &&
+        pattern[patternIndex] !== "."
+      ) {
         break;
       }
 
