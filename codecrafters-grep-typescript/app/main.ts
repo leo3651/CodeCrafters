@@ -58,7 +58,28 @@ function matchPattern(inputLine: string, pattern: string): boolean {
 
   // Combining character classes
   else {
-    return combiningCharClasses(inputLine, pattern);
+    if (pattern.includes("?")) {
+      const possiblePatterns = [];
+      let matchZeroPattern = pattern;
+
+      possiblePatterns.push(pattern.replaceAll("?", ""));
+
+      while (matchZeroPattern.includes("?")) {
+        const questionMarkIndex = matchZeroPattern.indexOf("?");
+        matchZeroPattern = matchZeroPattern.replace(
+          matchZeroPattern[questionMarkIndex - 1],
+          ""
+        );
+        matchZeroPattern = matchZeroPattern.replace("?", "");
+      }
+      possiblePatterns.push(matchZeroPattern);
+
+      return possiblePatterns.some((possiblePattern) =>
+        combiningCharClasses(inputLine, possiblePattern)
+      );
+    } else {
+      return combiningCharClasses(inputLine, pattern);
+    }
   }
 }
 
@@ -90,61 +111,54 @@ function matchAlphanumericChars(inputLine: string): boolean {
 }
 
 function combiningCharClasses(inputLine: string, pattern: string): boolean {
-  if (
-    pattern.includes("\\d") ||
-    pattern.includes("\\w") ||
-    pattern.includes("+")
-  ) {
-    for (let i = 0; i < inputLine.length; i++) {
-      for (
-        let patternIndex = 0, inputLineIndex = 0;
-        patternIndex < pattern.length;
-        patternIndex++, inputLineIndex++
-      ) {
-        // Backslash \\
-        if (pattern[patternIndex] === "\\") {
-          patternIndex++;
+  for (let i = 0; i < inputLine.length; i++) {
+    for (
+      let patternIndex = 0, inputLineIndex = 0;
+      patternIndex < pattern.length;
+      patternIndex++, inputLineIndex++
+    ) {
+      // Backslash \\
+      if (pattern[patternIndex] === "\\") {
+        patternIndex++;
 
-          // \d || \w
-          if (
-            pattern[patternIndex] === "d" &&
-            !matchAnyDigit(inputLine[i + inputLineIndex])
-          ) {
-            break;
-          } else if (
-            pattern[patternIndex] === "w" &&
-            !matchAlphanumericChars(inputLine[i + inputLineIndex])
-          ) {
-            break;
-          }
-        }
-
-        // Match one or more times
-        else if (
-          pattern[patternIndex + 1] === "+" &&
-          inputLine[i + inputLineIndex] === pattern[patternIndex]
+        // \d || \w
+        if (
+          pattern[patternIndex] === "d" &&
+          !matchAnyDigit(inputLine[i + inputLineIndex])
         ) {
-          while (inputLine[i + inputLineIndex] === pattern[patternIndex]) {
-            i++;
-          }
-          patternIndex++;
-          i--;
-        }
-
-        // Compare chars (break if not equal)
-        else if (inputLine[i + inputLineIndex] !== pattern[patternIndex]) {
+          break;
+        } else if (
+          pattern[patternIndex] === "w" &&
+          !matchAlphanumericChars(inputLine[i + inputLineIndex])
+        ) {
           break;
         }
+      }
 
-        // Input line matches pattern
-        if (patternIndex === pattern.length - 1) {
-          return true;
+      // Match one or more times
+      else if (
+        pattern[patternIndex + 1] === "+" &&
+        inputLine[i + inputLineIndex] === pattern[patternIndex]
+      ) {
+        while (inputLine[i + inputLineIndex] === pattern[patternIndex]) {
+          i++;
         }
+        patternIndex++;
+        i--;
+      }
+
+      // Compare chars (break if not equal)
+      else if (inputLine[i + inputLineIndex] !== pattern[patternIndex]) {
+        break;
+      }
+
+      // Input line matches pattern
+      if (patternIndex === pattern.length - 1) {
+        return true;
       }
     }
-    return false;
   }
-  return true;
+  return false;
 }
 
 function startOfStringAnchor(inputLine: string, pattern: string): boolean {
