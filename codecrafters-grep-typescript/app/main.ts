@@ -1,6 +1,9 @@
 const args = process.argv;
 const pattern = args[3];
 
+let alternationBracketsOpened = false;
+let patternAlternationStartingIndex: number;
+
 const inputLine: string = await Bun.stdin.text();
 console.log(`Input Line: ${inputLine}`);
 console.log(`Pattern: ${pattern}, len: ${pattern.length}`);
@@ -58,28 +61,7 @@ function matchPattern(inputLine: string, pattern: string): boolean {
 
   // Combining character classes
   else {
-    if (pattern.includes("?")) {
-      const possiblePatterns = [];
-      let matchZeroPattern = pattern;
-
-      possiblePatterns.push(pattern.replaceAll("?", ""));
-
-      while (matchZeroPattern.includes("?")) {
-        const questionMarkIndex = matchZeroPattern.indexOf("?");
-        matchZeroPattern = matchZeroPattern.replace(
-          matchZeroPattern[questionMarkIndex - 1],
-          ""
-        );
-        matchZeroPattern = matchZeroPattern.replace("?", "");
-      }
-      possiblePatterns.push(matchZeroPattern);
-
-      return possiblePatterns.some((possiblePattern) =>
-        combiningCharClasses(inputLine, possiblePattern)
-      );
-    } else {
-      return combiningCharClasses(inputLine, pattern);
-    }
+    return combiningCharClasses(inputLine, pattern);
   }
 }
 
@@ -110,6 +92,26 @@ function matchAlphanumericChars(inputLine: string): boolean {
   return false;
 }
 
+function startOfStringAnchor(inputLine: string, pattern: string): boolean {
+  if (inputLine.indexOf(pattern.slice(1)) !== 0) {
+    return false;
+  }
+  return true;
+}
+
+function endOfStringAnchor(inputLine: string, pattern: string): boolean {
+  const inputLineWords = inputLine.split(" ");
+  const patternWords = pattern.slice(0, -1).split(" ");
+
+  if (
+    patternWords[patternWords.length - 1] !==
+    inputLineWords[inputLineWords.length - 1]
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function combiningCharClasses(inputLine: string, pattern: string): boolean {
   for (let i = 0; i < inputLine.length; i++) {
     for (
@@ -117,6 +119,28 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
       patternIndex < pattern.length;
       patternIndex++, inputLineIndex++
     ) {
+      // Reached the correct alternation
+      if (pattern[patternIndex] === "|") {
+        while (pattern[patternIndex] !== ")") {
+          patternIndex++;
+        }
+      }
+
+      // Opening brackets
+      if (pattern[patternIndex] === "(") {
+        if (alternationBrackets(pattern, patternIndex)) {
+          alternationBracketsOpened = true;
+          patternAlternationStartingIndex = patternIndex + 1;
+        }
+        patternIndex++;
+      }
+
+      // Closing brackets
+      if (pattern[patternIndex] === ")") {
+        alternationBracketsOpened = false;
+        patternIndex++;
+      }
+
       // Backslash \\
       if (pattern[patternIndex] === "\\") {
         patternIndex++;
@@ -161,16 +185,37 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
         i--;
       }
 
+      // Match zero or one time
+      else if (pattern[patternIndex + 1] === "?") {
+        if (pattern[patternIndex] === inputLine[i + inputLineIndex]) {
+          patternIndex++;
+        } else if (
+          pattern[patternIndex + 2] === inputLine[i + inputLineIndex]
+        ) {
+          patternIndex += 2;
+        } else {
+          break;
+        }
+      }
+
       // Compare chars (break if not equal)
       else if (
         inputLine[i + inputLineIndex] !== pattern[patternIndex] &&
         pattern[patternIndex] !== "."
       ) {
-        break;
+        if (!alternationBracketsOpened) {
+          break;
+        } else {
+          i--;
+          pattern =
+            pattern.slice(0, patternAlternationStartingIndex) +
+            pattern.slice(pattern.indexOf("|") + 1);
+          alternationBracketsOpened = false;
+        }
       }
 
       // Input line matches pattern
-      if (patternIndex === pattern.length - 1) {
+      if (patternIndex >= pattern.length - 1) {
         return true;
       }
     }
@@ -178,22 +223,17 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
   return false;
 }
 
-function startOfStringAnchor(inputLine: string, pattern: string): boolean {
-  if (inputLine.indexOf(pattern.slice(1)) !== 0) {
-    return false;
+function alternationBrackets(pattern: string, index: number): boolean {
+  while (true) {
+    if (pattern[index] === ")") {
+      return false;
+    }
+    if (pattern[index] === "|") {
+      return true;
+    }
+    if (index > pattern.length) {
+      return false;
+    }
+    index++;
   }
-  return true;
-}
-
-function endOfStringAnchor(inputLine: string, pattern: string): boolean {
-  const inputLineWords = inputLine.split(" ");
-  const patternWords = pattern.slice(0, -1).split(" ");
-
-  if (
-    patternWords[patternWords.length - 1] !==
-    inputLineWords[inputLineWords.length - 1]
-  ) {
-    return false;
-  }
-  return true;
 }
