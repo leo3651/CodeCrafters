@@ -3,10 +3,22 @@ const pattern = args[3];
 
 let alternationBracketsOpened = false;
 let patternAlternationStartingIndex: number;
+let inputLineAlternationStartingIndex: number;
+const startingBackreferencesIndexes: number[] = [];
+const endingBackreferencesIndexes: number[] = [];
+let numberOfNestedBrackets: number = 0;
+let nestedBracketsOpened: boolean = false;
+// combiningCharClasses("abcd is abcd, not efg", "([abcd]+) is \\1, not [^xyz]+");
+// combiningCharClasses("a cow", "a (cat|dog)");
+// combiningCharClasses(
+//   "this starts and ends with this",
+//   "^(\\w+) starts and ends with \\1$"
+// );
 
 const inputLine: string = await Bun.stdin.text();
 console.log(`Input Line: ${inputLine}`);
 console.log(`Pattern: ${pattern}, len: ${pattern.length}`);
+console.log("\n");
 
 if (args[2] !== "-E") {
   console.log("Expected first argument to be '-E'");
@@ -49,16 +61,6 @@ function matchPattern(inputLine: string, pattern: string): boolean {
     return charsArr.some((char) => inputLine.includes(char));
   }
 
-  // Start of string anchor
-  else if (pattern.startsWith("^")) {
-    return startOfStringAnchor(inputLine, pattern);
-  }
-
-  // End of string anchor
-  else if (pattern.endsWith("$")) {
-    return endOfStringAnchor(inputLine, pattern);
-  }
-
   // Combining character classes
   else {
     return combiningCharClasses(inputLine, pattern);
@@ -79,6 +81,10 @@ function matchAnyDigit(inputLine: string): boolean {
 }
 
 function matchAlphanumericChars(inputLine: string): boolean {
+  if (!inputLine) {
+    return false;
+  }
+
   for (let i = 0; i < inputLine.length; i++) {
     if (
       (inputLine[i].charCodeAt(0) >= 48 && inputLine[i].charCodeAt(0) <= 57) ||
@@ -92,26 +98,6 @@ function matchAlphanumericChars(inputLine: string): boolean {
   return false;
 }
 
-function startOfStringAnchor(inputLine: string, pattern: string): boolean {
-  if (inputLine.indexOf(pattern.slice(1)) !== 0) {
-    return false;
-  }
-  return true;
-}
-
-function endOfStringAnchor(inputLine: string, pattern: string): boolean {
-  const inputLineWords = inputLine.split(" ");
-  const patternWords = pattern.slice(0, -1).split(" ");
-
-  if (
-    patternWords[patternWords.length - 1] !==
-    inputLineWords[inputLineWords.length - 1]
-  ) {
-    return false;
-  }
-  return true;
-}
-
 function combiningCharClasses(inputLine: string, pattern: string): boolean {
   for (let i = 0; i < inputLine.length; i++) {
     for (
@@ -119,34 +105,156 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
       patternIndex < pattern.length;
       patternIndex++, inputLineIndex++
     ) {
+      // Start of string anchor
+      if (pattern[patternIndex] === "^") {
+        if (i + inputLineIndex !== 0) {
+          break;
+        }
+        inputLineIndex--;
+      }
+
+      // End of string anchor
+      else if (pattern[patternIndex] === "$") {
+        if (i + inputLineIndex - 1 !== inputLine.length - 1) {
+          break;
+        }
+      }
+
       // Reached the correct alternation
-      if (pattern[patternIndex] === "|") {
+      else if (pattern[patternIndex] === "|") {
         while (pattern[patternIndex] !== ")") {
           patternIndex++;
         }
+
+        patternIndex--;
+        inputLineIndex--;
       }
 
       // Opening brackets
-      if (pattern[patternIndex] === "(") {
+      else if (pattern[patternIndex] === "(") {
+        startingBackreferencesIndexes.push(inputLineIndex + i);
+
+        if (
+          nestedBrackets(pattern.slice(patternIndex)) &&
+          !nestedBracketsOpened
+        ) {
+          nestedBracketsOpened = true;
+          writeNestedBracketsNumber(pattern.slice(patternIndex));
+        }
+
         if (alternationBrackets(pattern, patternIndex)) {
           alternationBracketsOpened = true;
           patternAlternationStartingIndex = patternIndex + 1;
+          inputLineAlternationStartingIndex = i + inputLineIndex - 1;
         }
-        patternIndex++;
+
+        inputLineIndex--;
+      }
+
+      // Char groups opening brackets
+      else if (pattern[patternIndex] === "[") {
+        let negCharGroup = false;
+        if (pattern[patternIndex + 1] === "^") {
+          negCharGroup = true;
+          patternIndex++;
+        }
+
+        const charGroupStartIndex = patternIndex + 1;
+        const inputLineCharGroupStartIndex = inputLineIndex + i;
+
+        while (pattern[patternIndex] !== "]") {
+          patternIndex++;
+        }
+
+        while (
+          inputLine[i + inputLineIndex] !== " " &&
+          i + inputLineIndex !== inputLine.length
+        ) {
+          inputLineIndex++;
+        }
+
+        const charGroup = pattern.slice(charGroupStartIndex, patternIndex);
+        const inputLineCharGroup = inputLine.slice(
+          inputLineCharGroupStartIndex,
+          i + inputLineIndex
+        );
+
+        console.log("posCharGroup", [charGroup]);
+        console.log("inputLinePosCharGroup", [inputLineCharGroup]);
+
+        if (negCharGroup) {
+          if (
+            charGroup
+              .split("")
+              .some((char) => inputLineCharGroup.includes(char))
+          ) {
+            break;
+          }
+        } else {
+          if (
+            charGroup
+              .split("")
+              .every((char) => !inputLineCharGroup.includes(char))
+          ) {
+            break;
+          }
+        }
+
+        patternIndex--;
+        inputLineIndex--;
+      }
+
+      // Char group closing brackets
+      else if (pattern[patternIndex] === "]") {
+        if (pattern[patternIndex + 1] === "+") {
+          patternIndex++;
+        }
+
+        inputLineIndex--;
       }
 
       // Closing brackets
-      if (pattern[patternIndex] === ")") {
+      else if (pattern[patternIndex] === ")") {
         alternationBracketsOpened = false;
-        patternIndex++;
+
+        if (nestedBracketsOpened) {
+          numberOfNestedBrackets--;
+          if (numberOfNestedBrackets === 0) {
+            nestedBracketsOpened = false;
+          }
+          endingBackreferencesIndexes.unshift(inputLineIndex + i);
+        } else {
+          endingBackreferencesIndexes.push(inputLineIndex + i);
+        }
+
+        inputLineIndex--;
       }
 
       // Backslash \\
-      if (pattern[patternIndex] === "\\") {
+      else if (pattern[patternIndex] === "\\") {
         patternIndex++;
 
-        // \d || \w
+        // \d || \w || \w+ || \d+
+
         if (
+          pattern[patternIndex] === "d" &&
+          pattern[patternIndex + 1] === "+"
+        ) {
+          while (matchAnyDigit(inputLine[inputLineIndex])) {
+            inputLineIndex++;
+          }
+          inputLineIndex--;
+          patternIndex++;
+        } else if (
+          pattern[patternIndex] === "w" &&
+          pattern[patternIndex + 1] === "+"
+        ) {
+          while (matchAlphanumericChars(inputLine[inputLineIndex])) {
+            inputLineIndex++;
+          }
+          inputLineIndex--;
+          patternIndex++;
+        } else if (
           pattern[patternIndex] === "d" &&
           !matchAnyDigit(inputLine[i + inputLineIndex])
         ) {
@@ -156,6 +264,30 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
           !matchAlphanumericChars(inputLine[i + inputLineIndex])
         ) {
           break;
+        } else if (matchAnyDigit(pattern[patternIndex])) {
+          const backreferenceNumber = Number.parseInt(pattern[patternIndex]);
+          const backreferenceString = inputLine.slice(
+            startingBackreferencesIndexes[backreferenceNumber - 1],
+            endingBackreferencesIndexes[backreferenceNumber - 1]
+          );
+
+          if (
+            !validBackreference(
+              backreferenceString,
+              inputLine.slice(inputLineIndex + i)
+            )
+          ) {
+            break;
+          }
+          inputLineIndex += backreferenceString.length - 1;
+
+          console.log("backreference string: ", [backreferenceString]);
+          console.log("pattern: ", [pattern]);
+          console.log(
+            "inputLine pos: ",
+            `"${[inputLine[inputLineIndex + i]]}"`
+          );
+          console.log("pattern pos: ", `"${[pattern[patternIndex]]}"`);
         }
       }
 
@@ -166,23 +298,21 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
           pattern[patternIndex] === ".")
       ) {
         let breakLoop = false;
-        const originalIndex = i;
 
         while (inputLine[i + inputLineIndex] !== pattern[patternIndex + 2]) {
-          i++;
-          if (i > inputLine.length - 1) {
+          inputLineIndex++;
+          if (inputLineIndex > inputLine.length - 1) {
             breakLoop = true;
             break;
           }
         }
 
         if (breakLoop) {
-          i = originalIndex;
           break;
         }
 
         patternIndex++;
-        i--;
+        inputLineIndex--;
       }
 
       // Match zero or one time
@@ -206,7 +336,9 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
         if (!alternationBracketsOpened) {
           break;
         } else {
-          i--;
+          inputLineIndex = inputLineAlternationStartingIndex;
+          patternIndex = patternAlternationStartingIndex - 2;
+          startingBackreferencesIndexes.pop();
           pattern =
             pattern.slice(0, patternAlternationStartingIndex) +
             pattern.slice(pattern.indexOf("|") + 1);
@@ -236,4 +368,39 @@ function alternationBrackets(pattern: string, index: number): boolean {
     }
     index++;
   }
+}
+
+function validBackreference(
+  backreferenceString: string,
+  inputLine: string
+): boolean {
+  for (let i = 0; i < backreferenceString.length; i++) {
+    if (inputLine[i] !== backreferenceString[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function writeNestedBracketsNumber(pattern: string): void {
+  let i = 0;
+  while (pattern[i] !== ")") {
+    if (pattern[i] === "(") {
+      numberOfNestedBrackets++;
+    }
+    i++;
+  }
+}
+
+function nestedBrackets(pattern: string): boolean {
+  let i = 1;
+  let nestedBrackets = false;
+  while (pattern[i] !== ")") {
+    if (pattern[i] === "(") {
+      nestedBrackets = true;
+    }
+    i++;
+  }
+
+  return nestedBrackets;
 }
