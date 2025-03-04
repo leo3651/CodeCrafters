@@ -8,11 +8,9 @@ const startingBackreferencesIndexes: number[] = [];
 const endingBackreferencesIndexes: number[] = [];
 let numberOfNestedBrackets: number = 0;
 let nestedBracketsOpened: boolean = false;
-// combiningCharClasses("abcd is abcd, not efg", "([abcd]+) is \\1, not [^xyz]+");
-// combiningCharClasses("a cow", "a (cat|dog)");
 // combiningCharClasses(
-//   "this starts and ends with this",
-//   "^(\\w+) starts and ends with \\1$"
+//   "abc-def is abc-def, not efg",
+//   "([abc]+)-([def]+) is \\1-\\2, not [^xyz]+"
 // );
 
 const inputLine: string = await Bun.stdin.text();
@@ -168,6 +166,7 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
 
         while (
           inputLine[i + inputLineIndex] !== " " &&
+          inputLine[i + inputLineIndex] !== "-" &&
           i + inputLineIndex !== inputLine.length
         ) {
           inputLineIndex++;
