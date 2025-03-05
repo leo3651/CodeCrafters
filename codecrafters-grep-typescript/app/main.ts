@@ -8,10 +8,7 @@ const startingBackreferencesIndexes: number[] = [];
 const endingBackreferencesIndexes: number[] = [];
 let numberOfNestedBrackets: number = 0;
 let nestedBracketsOpened: boolean = false;
-// combiningCharClasses(
-//   "abc-def is abc-def, not efg",
-//   "([abc]+)-([def]+) is \\1-\\2, not [^xyz]+"
-// );
+let nestedBracketsPlaceholder: number = 0;
 
 const inputLine: string = await Bun.stdin.text();
 console.log(`Input Line: ${inputLine}`);
@@ -130,12 +127,12 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
 
       // Opening brackets
       else if (pattern[patternIndex] === "(") {
-        startingBackreferencesIndexes.push(inputLineIndex + i);
-
         if (
           nestedBrackets(pattern.slice(patternIndex)) &&
           !nestedBracketsOpened
         ) {
+          nestedBracketsPlaceholder = startingBackreferencesIndexes.length;
+          endingBackreferencesIndexes[nestedBracketsPlaceholder] = 999;
           nestedBracketsOpened = true;
           writeNestedBracketsNumber(pattern.slice(patternIndex));
         }
@@ -146,6 +143,7 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
           inputLineAlternationStartingIndex = i + inputLineIndex - 1;
         }
 
+        startingBackreferencesIndexes.push(inputLineIndex + i);
         inputLineIndex--;
       }
 
@@ -167,6 +165,7 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
         while (
           inputLine[i + inputLineIndex] !== " " &&
           inputLine[i + inputLineIndex] !== "-" &&
+          inputLine[i + inputLineIndex] !== "," &&
           i + inputLineIndex !== inputLine.length
         ) {
           inputLineIndex++;
@@ -177,9 +176,6 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
           inputLineCharGroupStartIndex,
           i + inputLineIndex
         );
-
-        console.log("posCharGroup", [charGroup]);
-        console.log("inputLinePosCharGroup", [inputLineCharGroup]);
 
         if (negCharGroup) {
           if (
@@ -218,10 +214,12 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
 
         if (nestedBracketsOpened) {
           numberOfNestedBrackets--;
-          if (numberOfNestedBrackets === 0) {
-            nestedBracketsOpened = false;
-          }
-          endingBackreferencesIndexes.unshift(inputLineIndex + i);
+        }
+
+        if (nestedBracketsOpened && numberOfNestedBrackets === 0) {
+          nestedBracketsOpened = false;
+          endingBackreferencesIndexes[nestedBracketsPlaceholder] =
+            inputLineIndex + i;
         } else {
           endingBackreferencesIndexes.push(inputLineIndex + i);
         }
@@ -279,14 +277,6 @@ function combiningCharClasses(inputLine: string, pattern: string): boolean {
             break;
           }
           inputLineIndex += backreferenceString.length - 1;
-
-          console.log("backreference string: ", [backreferenceString]);
-          console.log("pattern: ", [pattern]);
-          console.log(
-            "inputLine pos: ",
-            `"${[inputLine[inputLineIndex + i]]}"`
-          );
-          console.log("pattern pos: ", `"${[pattern[patternIndex]]}"`);
         }
       }
 
@@ -383,9 +373,19 @@ function validBackreference(
 
 function writeNestedBracketsNumber(pattern: string): void {
   let i = 0;
-  while (pattern[i] !== ")") {
+  let openingBrackets = 0;
+  let closingBrackets = 0;
+
+  while (true) {
+    if (pattern[i] === ")") {
+      closingBrackets++;
+    }
     if (pattern[i] === "(") {
+      openingBrackets++;
       numberOfNestedBrackets++;
+    }
+    if (pattern[i] === ")" && openingBrackets - closingBrackets === 0) {
+      break;
     }
     i++;
   }
