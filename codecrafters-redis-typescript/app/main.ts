@@ -1,7 +1,7 @@
 import * as net from "net";
 
 const CRLF = "\r\n";
-const COMMANDS = { echo: true, ping: true };
+const STORED_DATA: { [key: string]: string } = {};
 
 const server: net.Server = net.createServer((socket: net.Socket) => {
   // Handle connection
@@ -84,6 +84,37 @@ function handleCommand(decodedData: string[], socket: net.Socket) {
         socket.write(encodeBulkString("PONG"));
         break;
 
+      case "set":
+        i++;
+
+        const key = decodedData[i];
+        const val = decodedData[i + 1];
+        STORED_DATA[key] = val;
+
+        i += 2;
+
+        if (decodedData[i]?.toLowerCase() === "px") {
+          i++;
+          const expiryTime = Number.parseInt(decodedData[i]);
+
+          setTimeout(() => {
+            delete STORED_DATA[key];
+          }, expiryTime);
+        }
+
+        socket.write(encodeSimpleString("OK"));
+        break;
+
+      case "get":
+        i++;
+
+        if (STORED_DATA[decodedData[i]]) {
+          socket.write(encodeBulkString(STORED_DATA[decodedData[i]]));
+        } else {
+          socket.write(nullBulkString());
+        }
+        break;
+
       default:
         console.log("Unhandled command");
         break;
@@ -93,4 +124,12 @@ function handleCommand(decodedData: string[], socket: net.Socket) {
 
 function encodeBulkString(data: string) {
   return `$${data.length}\r\n${data}\r\n`;
+}
+
+function encodeSimpleString(data: string) {
+  return `+${data}\r\n`;
+}
+
+function nullBulkString() {
+  return "$-1\r\n";
 }
