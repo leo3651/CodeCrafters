@@ -1,135 +1,378 @@
 import * as net from "net";
+import fs from "fs";
+import { EOpCode } from "./model";
 
-const CRLF = "\r\n";
-const STORED_DATA: { [key: string]: string } = {};
+class RdbHandler {
+  private readonly CRLF = "\r\n";
 
-const server: net.Server = net.createServer((socket: net.Socket) => {
-  // Handle connection
-  console.log("New client connected");
+  private STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
+  private AUX_KEY_VAL_PAIRS: { [key: string]: string } = {};
+  private KEY_VAL_WITHOUT_EXPIRY: { [key: string]: string } = {};
+  private KEY_VAL_WITH_EXPIRY: { [key: string]: string } = {};
 
-  socket.on("data", (data) => {
-    console.log(
-      `Received data from CLIENT: ${JSON.stringify(data.toString())}`
-    );
-    console.log(redisProtocolParser(data.toString(), 0));
+  private dir: string = "";
+  private dbFileName: string = "";
 
-    const [decodedData, _] = redisProtocolParser(data.toString(), 0);
-    handleCommand(decodedData, socket);
-  });
-});
+  private parseRdbFileOffset: number = 0;
+  private parseRedisProtocolOffset: number = 0;
 
-server.listen(6379, "127.0.0.1");
+  constructor() {
+    this.handleCommandLineArgs();
+    this.createServer();
+  }
 
-function redisProtocolParser(data: string, offset: number): [string[], number] {
-  const type: string = data[offset];
-  const words: string[] = [];
+  handleCommandLineArgs(): void {
+    const args = process.argv.slice(2);
 
-  switch (type) {
-    case "*":
-      offset++;
-
-      const arrLenAsStr = data.slice(offset, data.indexOf(CRLF, offset));
-      const arrLen = Number.parseInt(arrLenAsStr);
-      offset += arrLenAsStr.length;
-      offset += 2;
-
-      for (let i = 0; i < arrLen; i++) {
-        const [word, newOffset] = redisProtocolParser(data, offset);
-        offset = newOffset;
-        words.push(...word);
+    if (args.length === 4) {
+      if (args[0] === "--dir" && args[2] === "--dbfilename") {
+        this.dir = args[1];
+        this.dbFileName = args[3];
+      } else {
+        throw new Error("Unknown args");
       }
-
-      return [words, offset];
-
-    case "$":
-      const [word, newOffset] = readLine(data, offset);
-      words.push(word);
-      return [words, newOffset];
-
-    default:
-      throw new Error("Unhandled RESP data type");
-  }
-}
-
-function readLine(data: string, offset: number): [string, number] {
-  offset++;
-  const firstCRLFIndex = data.indexOf(CRLF, offset);
-
-  if (firstCRLFIndex === -1) {
-    throw new Error("Invalid frame");
+    }
   }
 
-  const lengthAsStr = data.slice(offset, firstCRLFIndex);
-  offset += lengthAsStr.length;
-  offset += 2;
-  const len = Number.parseInt(lengthAsStr);
+  createServer(): void {
+    const server: net.Server = net.createServer((socket: net.Socket) => {
+      // Handle connection
+      console.log("New client connected");
 
-  const word = data.slice(offset, offset + len);
-  offset += len;
-  offset += 2;
+      socket.on("data", (data) => {
+        console.log(
+          `Received data from CLIENT: ${JSON.stringify(data.toString())}`
+        );
+        this.parseRedisProtocolOffset = 0;
+        this.parseRdbFileOffset = 0;
 
-  return [word, offset];
-}
+        const decodedData = this.redisProtocolParser(data.toString());
 
-function handleCommand(decodedData: string[], socket: net.Socket) {
-  for (let i = 0; i < decodedData.length; i++) {
-    switch (decodedData[i].toLowerCase()) {
-      case "echo":
-        i++;
-        const arg = decodedData[i];
-        socket.write(encodeBulkString(arg));
-        break;
+        console.log(decodedData);
+        this.handleRedisCommand(decodedData, socket);
+      });
+    });
 
-      case "ping":
-        socket.write(encodeBulkString("PONG"));
-        break;
+    server.listen(6379, "127.0.0.1");
+  }
 
-      case "set":
-        i++;
+  redisProtocolParser(data: string): string[] {
+    const type: string = data[this.parseRedisProtocolOffset];
+    const words: string[] = [];
 
-        const key = decodedData[i];
-        const val = decodedData[i + 1];
-        STORED_DATA[key] = val;
+    switch (type) {
+      case "*":
+        this.parseRedisProtocolOffset++;
 
-        i += 2;
+        const arrLenAsStr = data.slice(
+          this.parseRedisProtocolOffset,
+          data.indexOf(this.CRLF, this.parseRedisProtocolOffset)
+        );
+        const arrLen = Number.parseInt(arrLenAsStr);
 
-        if (decodedData[i]?.toLowerCase() === "px") {
-          i++;
-          const expiryTime = Number.parseInt(decodedData[i]);
+        this.parseRedisProtocolOffset += arrLenAsStr.length;
+        this.parseRedisProtocolOffset += 2;
 
-          setTimeout(() => {
-            delete STORED_DATA[key];
-          }, expiryTime);
+        for (let i = 0; i < arrLen; i++) {
+          const word = this.redisProtocolParser(data);
+          words.push(...word);
         }
 
-        socket.write(encodeSimpleString("OK"));
-        break;
+        return words;
 
-      case "get":
-        i++;
-
-        if (STORED_DATA[decodedData[i]]) {
-          socket.write(encodeBulkString(STORED_DATA[decodedData[i]]));
-        } else {
-          socket.write(nullBulkString());
-        }
-        break;
+      case "$":
+        const word = this.readRedisProtocolLine(data);
+        words.push(word);
+        return words;
 
       default:
-        console.log("Unhandled command");
+        throw new Error("Unhandled RESP data type");
+    }
+  }
+
+  readRedisProtocolLine(data: string): string {
+    this.parseRedisProtocolOffset++;
+
+    const firstCRLFIndex = data.indexOf(
+      this.CRLF,
+      this.parseRedisProtocolOffset
+    );
+
+    if (firstCRLFIndex === -1) {
+      throw new Error("Invalid frame");
+    }
+
+    const lengthAsStr = data.slice(
+      this.parseRedisProtocolOffset,
+      firstCRLFIndex
+    );
+    const len = Number.parseInt(lengthAsStr);
+
+    this.parseRedisProtocolOffset += lengthAsStr.length;
+    this.parseRedisProtocolOffset += 2;
+
+    const word = data.slice(
+      this.parseRedisProtocolOffset,
+      this.parseRedisProtocolOffset + len
+    );
+
+    this.parseRedisProtocolOffset += len;
+    this.parseRedisProtocolOffset += 2;
+
+    return word;
+  }
+
+  handleRedisCommand(decodedData: string[], socket: net.Socket): void {
+    for (let i = 0; i < decodedData.length; i++) {
+      switch (decodedData[i].toLowerCase()) {
+        case "echo":
+          i++;
+          const arg = decodedData[i];
+          socket.write(this.encodeBulkString(arg));
+
+          break;
+
+        case "ping":
+          socket.write(this.encodeBulkString("PONG"));
+
+          break;
+
+        case "set":
+          i++;
+
+          const key = decodedData[i];
+          const val = decodedData[i + 1];
+          this.STORED_KEY_VAL_PAIRS[key] = val;
+
+          i += 2;
+
+          // Handle expiry
+          if (decodedData[i]?.toLowerCase() === "px") {
+            i++;
+            const expiryTime = Number.parseInt(decodedData[i]);
+
+            setTimeout(() => {
+              delete this.STORED_KEY_VAL_PAIRS[key];
+            }, expiryTime);
+          }
+
+          socket.write(this.encodeSimpleString("OK"));
+
+          break;
+
+        case "get":
+          i++;
+
+          if (this.STORED_KEY_VAL_PAIRS[decodedData[i]]) {
+            socket.write(
+              this.encodeBulkString(this.STORED_KEY_VAL_PAIRS[decodedData[i]])
+            );
+          } else {
+            socket.write(this.nullBulkString());
+          }
+
+          break;
+
+        case "config":
+          i++;
+
+          if (decodedData[i]?.toLowerCase() === "get") {
+            i++;
+            if (decodedData[i] === "dir") {
+              socket.write(this.encodeArrWithBulkStrings(["dir", this.dir]));
+            } else if (decodedData[i] === "dbfilename") {
+              socket.write(
+                this.encodeArrWithBulkStrings(["dbfilename", this.dbFileName])
+              );
+            } else {
+              throw new Error("Wrong CONFIG command");
+            }
+          } else {
+            throw new Error("Unhandled CONFIG req");
+          }
+
+          break;
+
+        case "keys":
+          i++;
+          const rdbFileContent = fs.readFileSync(
+            this.dir + "/" + this.dbFileName
+          );
+          this.parseRdbFile(rdbFileContent);
+
+          if (decodedData[i] === "*") {
+            socket.write(
+              this.encodeArrWithBulkStrings([
+                ...Object.keys(this.KEY_VAL_WITHOUT_EXPIRY),
+                ...Object.keys(this.KEY_VAL_WITH_EXPIRY),
+              ])
+            );
+          } else {
+            throw new Error("Unsupported keys arg");
+          }
+
+          console.log("RDB FILE BUFFER: ", rdbFileContent);
+          console.log("RDB FILE STRING: ", rdbFileContent.toString());
+          console.log("RDB FILE HEX: ", rdbFileContent.toString("hex"));
+          break;
+
+        default:
+          console.log("Unhandled command");
+          break;
+      }
+    }
+  }
+
+  encodeBulkString(data: string): string {
+    return `$${data.length}\r\n${data}\r\n`;
+  }
+
+  encodeSimpleString(data: string): string {
+    return `+${data}\r\n`;
+  }
+
+  nullBulkString(): string {
+    return "$-1\r\n";
+  }
+
+  encodeArrWithBulkStrings(strArr: string[]): string {
+    let output = `*${strArr.length}\r\n`;
+    for (let i = 0; i < strArr.length; i++) {
+      output += this.encodeBulkString(strArr[i]);
+    }
+
+    return output;
+  }
+
+  parseRdbFile(data: Buffer): void {
+    const magicStr = data.slice(this.parseRdbFileOffset, 9).toString();
+    this.parseRdbFileOffset += 9;
+
+    if (magicStr !== "REDIS0011") {
+      throw new Error("Unexpected file format");
+    }
+
+    while (true) {
+      if (this.parseRdbFileOffset === data.length - 1) {
         break;
+      }
+
+      switch (data[this.parseRdbFileOffset]) {
+        case EOpCode.AUX:
+          this.parseRdbFileOffset++;
+          const key = this.readRedisString(data);
+          this.parseRdbFileOffset++;
+          const val = this.readRedisString(data);
+
+          this.AUX_KEY_VAL_PAIRS[key.toString()] = val.toString();
+          break;
+
+        case EOpCode.SELECTDB:
+          this.parseRdbFileOffset++;
+          break;
+
+        case EOpCode.RESIZE_DB:
+          this.parseRdbFileOffset++;
+          {
+            const hashTableSize = this.readLength(data);
+            this.parseRdbFileOffset++;
+            const expiryHashTableSize = this.readLength(data);
+            this.parseRdbFileOffset++;
+
+            for (let i = 0; i < expiryHashTableSize; i++) {}
+
+            for (let i = 0; i < hashTableSize; i++) {
+              const objType = data[this.parseRdbFileOffset];
+              this.parseRdbFileOffset++;
+              const key = this.readRedisString(data);
+              this.parseRdbFileOffset++;
+              const val = this.readRedisString(data);
+
+              this.KEY_VAL_WITHOUT_EXPIRY[key.toString()] = val.toString();
+            }
+          }
+
+          break;
+
+        default:
+          break;
+      }
+
+      this.parseRdbFileOffset++;
+    }
+
+    console.log(this.KEY_VAL_WITHOUT_EXPIRY);
+    console.log(this.AUX_KEY_VAL_PAIRS);
+  }
+
+  readLength(data: Buffer): number {
+    const first = data[this.parseRdbFileOffset];
+    const flag = first >> 6;
+
+    switch (flag) {
+      case 0: // MSB 00
+        return first & 0x3f;
+
+      case 1: {
+        // MSB 01
+        const val = ((first & 0x3f) << 6) | data[this.parseRdbFileOffset + 1];
+        this.parseRdbFileOffset++;
+        return val;
+      }
+
+      case 2: // MSB 10
+        const val = data.slice(this.parseRdbFileOffset + 1).readInt32BE();
+        this.parseRdbFileOffset += 4;
+        return val;
+
+      case 3: // MSB 11
+        const encType = first & 0x3f;
+        if (encType === 0) {
+          return data[this.parseRdbFileOffset];
+        }
+
+        if (encType === 1) {
+          const val = data.slice(this.parseRdbFileOffset + 1).readInt16BE(0);
+          this.parseRdbFileOffset += 2;
+          return val;
+        }
+
+        if (encType === 2) {
+          const val = data.slice(this.parseRdbFileOffset).readInt32BE(0);
+          this.parseRdbFileOffset += 4;
+          return val;
+        }
+
+        throw new Error(`Unsupported special encoding`);
+
+      default:
+        throw new Error(`Unsupported special encoding`);
+    }
+  }
+
+  readRedisString(data: Buffer): Buffer {
+    const startingOffset = this.parseRdbFileOffset + 1;
+    const first = data[this.parseRdbFileOffset];
+    const flag = first >> 6;
+
+    const value = this.readLength(data);
+
+    if (flag === 3) {
+      return Buffer.from(value.toString());
+    } else {
+      this.parseRdbFileOffset += value;
+      return data.slice(startingOffset, startingOffset + value);
     }
   }
 }
 
-function encodeBulkString(data: string) {
-  return `$${data.length}\r\n${data}\r\n`;
-}
-
-function encodeSimpleString(data: string) {
-  return `+${data}\r\n`;
-}
-
-function nullBulkString() {
-  return "$-1\r\n";
-}
+const handler = new RdbHandler();
+// handler.parseRdbFile(
+//   Buffer.from([
+//     82, 69, 68, 73, 83, 48, 48, 49, 49, 250, 9, 114, 101, 100, 105, 115, 45,
+//     118, 101, 114, 5, 55, 46, 50, 46, 48, 250, 10, 114, 101, 100, 105, 115, 45,
+//     98, 105, 116, 115, 192, 64, 254, 0, 251, 1, 0, 0, 6, 111, 114, 97, 110, 103,
+//     101, 9, 114, 97, 115, 112, 98, 101, 114, 114, 121, 255, 151, 77, 127, 87,
+//     212, 19, 129, 51, 10,
+//   ])
+// );

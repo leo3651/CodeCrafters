@@ -1,5 +1,6 @@
 import * as net from "net";
 
+console.log(Buffer.from("123").toString());
 // Create a TCP client
 const client: net.Socket = net.createConnection(
   { host: "127.0.0.1", port: 6379 },
