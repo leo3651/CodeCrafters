@@ -17,8 +17,26 @@ class RdbHandler {
   private parseRedisProtocolOffset: number = 0;
 
   constructor() {
-    this.handleCommandLineArgs();
     this.createServer();
+    this.handleCommandLineArgs();
+    this.readRdbFileIfExists();
+  }
+
+  readRdbFileIfExists() {
+    if (this.dir && this.dbFileName) {
+      const path = `${this.dir}/${this.dbFileName}`;
+      try {
+        const rdbFileContent = fs.readFileSync(path);
+
+        console.log("RDB FILE BUFFER: ", rdbFileContent);
+        console.log("RDB FILE STRING: ", rdbFileContent.toString());
+        console.log("RDB FILE HEX: ", rdbFileContent.toString("hex"));
+
+        this.parseRdbFile(rdbFileContent);
+      } catch (err) {
+        console.log(`${err} at path "${path}"`);
+      }
+    }
   }
 
   handleCommandLineArgs(): void {
@@ -163,10 +181,17 @@ class RdbHandler {
         case "get":
           i++;
 
-          if (this.STORED_KEY_VAL_PAIRS[decodedData[i]]) {
-            socket.write(
-              this.encodeBulkString(this.STORED_KEY_VAL_PAIRS[decodedData[i]])
-            );
+          if (
+            this.STORED_KEY_VAL_PAIRS[decodedData[i]] ||
+            this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i]] ||
+            this.KEY_VAL_WITH_EXPIRY[decodedData[i]]
+          ) {
+            const value =
+              this.STORED_KEY_VAL_PAIRS[decodedData[i]] ||
+              this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i]] ||
+              this.KEY_VAL_WITH_EXPIRY[decodedData[i]];
+
+            socket.write(this.encodeBulkString(value));
           } else {
             socket.write(this.nullBulkString());
           }
@@ -195,10 +220,6 @@ class RdbHandler {
 
         case "keys":
           i++;
-          const rdbFileContent = fs.readFileSync(
-            this.dir + "/" + this.dbFileName
-          );
-          this.parseRdbFile(rdbFileContent);
 
           if (decodedData[i] === "*") {
             socket.write(
@@ -211,9 +232,6 @@ class RdbHandler {
             throw new Error("Unsupported keys arg");
           }
 
-          console.log("RDB FILE BUFFER: ", rdbFileContent);
-          console.log("RDB FILE STRING: ", rdbFileContent.toString());
-          console.log("RDB FILE HEX: ", rdbFileContent.toString("hex"));
           break;
 
         default:
@@ -257,52 +275,94 @@ class RdbHandler {
         break;
       }
 
-      switch (data[this.parseRdbFileOffset]) {
-        case EOpCode.AUX:
+      this.parseOpCode(data);
+    }
+
+    console.log(this.KEY_VAL_WITHOUT_EXPIRY);
+    console.log(this.KEY_VAL_WITH_EXPIRY);
+    console.log(this.AUX_KEY_VAL_PAIRS);
+  }
+
+  parseOpCode(data: Buffer) {
+    switch (data[this.parseRdbFileOffset]) {
+      case EOpCode.AUX:
+        this.parseRdbFileOffset++;
+        const key = this.readRedisString(data);
+        this.parseRdbFileOffset++;
+        const val = this.readRedisString(data);
+
+        this.AUX_KEY_VAL_PAIRS[key.toString()] = val.toString();
+        break;
+
+      case EOpCode.SELECTDB:
+        this.parseRdbFileOffset++;
+        break;
+
+      case EOpCode.RESIZE_DB:
+        this.parseRdbFileOffset++;
+        {
+          const totalHashTableSize = this.readLength(data);
+          this.parseRdbFileOffset++;
+          const expiryHashTableSize = this.readLength(data);
+          this.parseRdbFileOffset++;
+          const hashTableSizeWithoutExpiry =
+            totalHashTableSize - expiryHashTableSize;
+
+          for (let i = 0; i < expiryHashTableSize; i++) {
+            this.parseOpCode(data);
+          }
+
+          for (let i = 0; i < hashTableSizeWithoutExpiry; i++) {
+            const objType = data[this.parseRdbFileOffset];
+            this.parseRdbFileOffset++;
+            const key = this.readRedisString(data);
+            this.parseRdbFileOffset++;
+            const val = this.readRedisString(data);
+            this.parseRdbFileOffset++;
+
+            this.KEY_VAL_WITHOUT_EXPIRY[key.toString()] = val.toString();
+          }
+        }
+
+        break;
+
+      case EOpCode.EXPIRE_TIME_SEC:
+      case EOpCode.EXPIRE_TIME_MS:
+        let expiryDate: number = 0;
+
+        if (data[this.parseRdbFileOffset] === EOpCode.EXPIRE_TIME_SEC) {
+          expiryDate =
+            data.slice(this.parseRdbFileOffset).readUInt32LE(1) * 1000;
+          this.parseRdbFileOffset += 5;
+        } else {
+          expiryDate = Number(
+            data.slice(this.parseRdbFileOffset).readBigUInt64LE(1)
+          );
+          this.parseRdbFileOffset += 9;
+        }
+
+        {
+          const objType = data[this.parseRdbFileOffset];
           this.parseRdbFileOffset++;
           const key = this.readRedisString(data);
           this.parseRdbFileOffset++;
           const val = this.readRedisString(data);
 
-          this.AUX_KEY_VAL_PAIRS[key.toString()] = val.toString();
-          break;
+          this.KEY_VAL_WITH_EXPIRY[key.toString()] = val.toString();
+          this.handleExpiry(
+            expiryDate,
+            this.KEY_VAL_WITH_EXPIRY,
+            key.toString()
+          );
+        }
 
-        case EOpCode.SELECTDB:
-          this.parseRdbFileOffset++;
-          break;
+        break;
 
-        case EOpCode.RESIZE_DB:
-          this.parseRdbFileOffset++;
-          {
-            const hashTableSize = this.readLength(data);
-            this.parseRdbFileOffset++;
-            const expiryHashTableSize = this.readLength(data);
-            this.parseRdbFileOffset++;
-
-            for (let i = 0; i < expiryHashTableSize; i++) {}
-
-            for (let i = 0; i < hashTableSize; i++) {
-              const objType = data[this.parseRdbFileOffset];
-              this.parseRdbFileOffset++;
-              const key = this.readRedisString(data);
-              this.parseRdbFileOffset++;
-              const val = this.readRedisString(data);
-
-              this.KEY_VAL_WITHOUT_EXPIRY[key.toString()] = val.toString();
-            }
-          }
-
-          break;
-
-        default:
-          break;
-      }
-
-      this.parseRdbFileOffset++;
+      default:
+        break;
     }
 
-    console.log(this.KEY_VAL_WITHOUT_EXPIRY);
-    console.log(this.AUX_KEY_VAL_PAIRS);
+    this.parseRdbFileOffset++;
   }
 
   readLength(data: Buffer): number {
@@ -364,6 +424,23 @@ class RdbHandler {
       return data.slice(startingOffset, startingOffset + value);
     }
   }
+
+  handleExpiry(
+    expireDate: number,
+    obj: { [key: string]: string },
+    key: string
+  ) {
+    const now = Date.now();
+    const expireTime = expireDate - now;
+
+    if (expireTime <= 0) {
+      delete obj[key];
+    } else {
+      setTimeout(() => {
+        delete obj[key];
+      }, expireTime);
+    }
+  }
 }
 
 const handler = new RdbHandler();
@@ -371,8 +448,14 @@ const handler = new RdbHandler();
 //   Buffer.from([
 //     82, 69, 68, 73, 83, 48, 48, 49, 49, 250, 9, 114, 101, 100, 105, 115, 45,
 //     118, 101, 114, 5, 55, 46, 50, 46, 48, 250, 10, 114, 101, 100, 105, 115, 45,
-//     98, 105, 116, 115, 192, 64, 254, 0, 251, 1, 0, 0, 6, 111, 114, 97, 110, 103,
-//     101, 9, 114, 97, 115, 112, 98, 101, 114, 114, 121, 255, 151, 77, 127, 87,
-//     212, 19, 129, 51, 10,
+//     98, 105, 116, 115, 192, 64, 254, 0, 251, 5, 5, 252, 0, 12, 40, 138, 199, 1,
+//     0, 0, 0, 5, 97, 112, 112, 108, 101, 9, 112, 105, 110, 101, 97, 112, 112,
+//     108, 101, 252, 0, 12, 40, 138, 199, 1, 0, 0, 0, 9, 112, 105, 110, 101, 97,
+//     112, 112, 108, 101, 6, 111, 114, 97, 110, 103, 101, 252, 0, 12, 40, 138,
+//     199, 1, 0, 0, 0, 9, 98, 108, 117, 101, 98, 101, 114, 114, 121, 5, 97, 112,
+//     112, 108, 101, 252, 0, 156, 239, 18, 126, 1, 0, 0, 0, 9, 114, 97, 115, 112,
+//     98, 101, 114, 114, 121, 4, 112, 101, 97, 114, 252, 0, 12, 40, 138, 199, 1,
+//     0, 0, 0, 6, 111, 114, 97, 110, 103, 101, 10, 115, 116, 114, 97, 119, 98,
+//     101, 114, 114, 121, 255, 173, 57, 112, 55, 200, 70, 114, 78, 10,
 //   ])
 // );
