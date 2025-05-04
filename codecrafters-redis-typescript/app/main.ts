@@ -1,6 +1,6 @@
 import * as net from "net";
 import fs from "fs";
-import { EOpCode } from "./model";
+import { EOpCode, type IInfo } from "./model";
 
 class RdbHandler {
   private readonly CRLF = "\r\n";
@@ -17,6 +17,7 @@ class RdbHandler {
   private parseRedisProtocolOffset: number = 0;
 
   private port: number = 6379;
+  private info: IInfo = { role: "master" };
 
   constructor() {
     this.handleCommandLineArgs();
@@ -43,21 +44,26 @@ class RdbHandler {
 
   handleCommandLineArgs(): void {
     const args = process.argv.slice(2);
-    console.log(args);
+    console.log(`ARGS: ${args}`);
 
-    if (args.length === 4) {
-      if (args[0] === "--dir" && args[2] === "--dbfilename") {
-        this.dir = args[1];
-        this.dbFileName = args[3];
-      } else {
-        throw new Error("Unknown args");
+    // dir and dbFileName
+    if (args[0] === "--dir" && args[2] === "--dbfilename") {
+      this.dir = args[1];
+      this.dbFileName = args[3];
+    }
+
+    // Custom port
+    else if (args[0] === "--port" && Number.parseInt(args[1])) {
+      this.port = Number.parseInt(args[1]);
+
+      if (args[2] === "--replicaof") {
+        this.info.role = "slave";
       }
     }
 
-    if (args.length === 2) {
-      if (args[0] === "--port" && Number.parseInt(args[1])) {
-        this.port = Number.parseInt(args[1]);
-      }
+    // Unknown command
+    else if (args.length) {
+      throw new Error("Unknown args");
     }
   }
 
@@ -244,11 +250,9 @@ class RdbHandler {
           break;
 
         case "info":
-          console.log(decodedData[i]);
           i++;
-          console.log(decodedData[i]);
           if (decodedData[i] === "replication") {
-            socket.write(this.encodeBulkString("role:master"));
+            socket.write(this.encodeBulkString(this.createStringFromInfo()));
           } else {
             throw new Error("Unhandled info argument");
           }
@@ -292,16 +296,16 @@ class RdbHandler {
     }
 
     while (true) {
-      if (this.parseRdbFileOffset === data.length - 1) {
+      if (this.parseRdbFileOffset >= data.length - 1) {
         break;
       }
 
       this.parseOpCode(data);
     }
 
-    console.log(this.KEY_VAL_WITHOUT_EXPIRY);
-    console.log(this.KEY_VAL_WITH_EXPIRY);
-    console.log(this.AUX_KEY_VAL_PAIRS);
+    console.log("NO EXPIRY", this.KEY_VAL_WITHOUT_EXPIRY);
+    console.log("EXPIRY", this.KEY_VAL_WITH_EXPIRY);
+    console.log("AUX:", this.AUX_KEY_VAL_PAIRS);
   }
 
   parseOpCode(data: Buffer) {
@@ -339,7 +343,10 @@ class RdbHandler {
             const key = this.readRedisString(data);
             this.parseRdbFileOffset++;
             const val = this.readRedisString(data);
-            this.parseRdbFileOffset++;
+
+            if (i !== hashTableSizeWithoutExpiry - 1) {
+              this.parseRdbFileOffset++;
+            }
 
             this.KEY_VAL_WITHOUT_EXPIRY[key.toString()] = val.toString();
           }
@@ -379,8 +386,12 @@ class RdbHandler {
 
         break;
 
-      default:
+      case EOpCode.EOF:
+        this.parseRdbFileOffset += 8;
         break;
+
+      default:
+        throw new Error("Unknown opCode");
     }
 
     this.parseRdbFileOffset++;
@@ -409,6 +420,7 @@ class RdbHandler {
       case 3: // MSB 11
         const encType = first & 0x3f;
         if (encType === 0) {
+          this.parseRdbFileOffset++;
           return data[this.parseRdbFileOffset];
         }
 
@@ -424,7 +436,7 @@ class RdbHandler {
           return val;
         }
 
-        throw new Error(`Unsupported special encoding`);
+        throw new Error(`Unsupported special encoding at MSB 11`);
 
       default:
         throw new Error(`Unsupported special encoding`);
@@ -462,6 +474,14 @@ class RdbHandler {
       }, expireTime);
     }
   }
+
+  createStringFromInfo() {
+    let result = "";
+    Object.keys(this.info).forEach(
+      (key) => (result += `${key}:${(this.info as any)[key]}`)
+    );
+    return result;
+  }
 }
 
 const handler = new RdbHandler();
@@ -478,5 +498,14 @@ const handler = new RdbHandler();
 //     98, 101, 114, 114, 121, 4, 112, 101, 97, 114, 252, 0, 12, 40, 138, 199, 1,
 //     0, 0, 0, 6, 111, 114, 97, 110, 103, 101, 10, 115, 116, 114, 97, 119, 98,
 //     101, 114, 114, 121, 255, 173, 57, 112, 55, 200, 70, 114, 78, 10,
+//   ])
+// );
+// handler.parseRdbFile(
+//   Buffer.from([
+//     82, 69, 68, 73, 83, 48, 48, 49, 49, 250, 9, 114, 101, 100, 105, 115, 45,
+//     118, 101, 114, 5, 55, 46, 50, 46, 48, 250, 10, 114, 101, 100, 105, 115, 45,
+//     98, 105, 116, 115, 192, 64, 254, 0, 251, 1, 0, 0, 9, 112, 105, 110, 101, 97,
+//     112, 112, 108, 101, 5, 103, 114, 97, 112, 101, 255, 144, 217, 29, 152, 66,
+//     69, 250, 87, 10,
 //   ])
 // );

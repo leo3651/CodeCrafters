@@ -6,3 +6,7 @@ export enum EOpCode {
   RESIZE_DB = 0xfb,
   AUX = 0xfa,
 }
+
+export interface IInfo {
+  role: string;
+}
