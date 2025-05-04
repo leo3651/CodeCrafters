@@ -16,9 +16,11 @@ class RdbHandler {
   private parseRdbFileOffset: number = 0;
   private parseRedisProtocolOffset: number = 0;
 
+  private port: number = 6379;
+
   constructor() {
-    this.createServer();
     this.handleCommandLineArgs();
+    this.createServer();
     this.readRdbFileIfExists();
   }
 
@@ -41,6 +43,7 @@ class RdbHandler {
 
   handleCommandLineArgs(): void {
     const args = process.argv.slice(2);
+    console.log(args);
 
     if (args.length === 4) {
       if (args[0] === "--dir" && args[2] === "--dbfilename") {
@@ -48,6 +51,12 @@ class RdbHandler {
         this.dbFileName = args[3];
       } else {
         throw new Error("Unknown args");
+      }
+    }
+
+    if (args.length === 2) {
+      if (args[0] === "--port" && Number.parseInt(args[1])) {
+        this.port = Number.parseInt(args[1]);
       }
     }
   }
@@ -71,7 +80,7 @@ class RdbHandler {
       });
     });
 
-    server.listen(6379, "127.0.0.1");
+    server.listen(this.port, "127.0.0.1");
   }
 
   redisProtocolParser(data: string): string[] {
@@ -230,6 +239,18 @@ class RdbHandler {
             );
           } else {
             throw new Error("Unsupported keys arg");
+          }
+
+          break;
+
+        case "info":
+          console.log(decodedData[i]);
+          i++;
+          console.log(decodedData[i]);
+          if (decodedData[i] === "replication") {
+            socket.write(this.encodeBulkString("role:master"));
+          } else {
+            throw new Error("Unhandled info argument");
           }
 
           break;
