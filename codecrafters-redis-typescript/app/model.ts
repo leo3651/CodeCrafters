@@ -9,4 +9,6 @@ export enum EOpCode {
 
 export interface IInfo {
   role: string;
+  master_replid: string;
+  master_repl_offset: number;
 }

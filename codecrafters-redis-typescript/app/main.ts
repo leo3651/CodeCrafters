@@ -17,7 +17,11 @@ class RdbHandler {
   private parseRedisProtocolOffset: number = 0;
 
   private port: number = 6379;
-  private info: IInfo = { role: "master" };
+  private info: IInfo = {
+    role: "master",
+    master_repl_offset: 0,
+    master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+  };
 
   constructor() {
     this.handleCommandLineArgs();
