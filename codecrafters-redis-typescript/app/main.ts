@@ -50,24 +50,26 @@ class RdbHandler {
     const args = process.argv.slice(2);
     console.log(`ARGS: ${args}`);
 
-    // dir and dbFileName
-    if (args[0] === "--dir" && args[2] === "--dbfilename") {
-      this.dir = args[1];
-      this.dbFileName = args[3];
+    // --dir and --dbFileName
+    if (args.includes("--dir") && args.includes("--dbfilename")) {
+      this.dir = args[args.indexOf("--dir") + 1];
+      this.dbFileName = args[args.indexOf("--dbfilename") + 1];
     }
 
-    // Custom port
-    else if (args[0] === "--port" && Number.parseInt(args[1])) {
+    // --port
+    if (
+      args.includes("--port") &&
+      Number.parseInt(args[args.indexOf("--port") + 1])
+    ) {
       this.port = Number.parseInt(args[1]);
-
-      if (args[2] === "--replicaof") {
-        this.info.role = "slave";
-      }
     }
 
-    // Unknown command
-    else if (args.length) {
-      throw new Error("Unknown args");
+    // --replicaof
+    if (args.includes("--replicaof")) {
+      this.info.role = "slave";
+      const host = args[args.indexOf("--replicaof") + 1];
+      const [hostName, port] = host.split(" ");
+      this.createClient(hostName, Number.parseInt(port));
     }
   }
 
@@ -485,6 +487,27 @@ class RdbHandler {
       (key) => (result += `${key}:${(this.info as any)[key]}`)
     );
     return result;
+  }
+
+  createClient(host: string, port: number) {
+    console.log(host, port);
+    const client: net.Socket = net.createConnection({ host, port }, () => {
+      console.log(
+        `Master replica at port: ${this.port} connected to master server`
+      );
+
+      client.write(this.encodeArrWithBulkStrings(["PING"]));
+    });
+
+    // Listen for server
+    client.on("data", (data) => {
+      console.log("Received from server:", data.toString());
+    });
+
+    // Handle disconnection
+    client.on("end", () => {
+      console.log("Disconnected from server");
+    });
   }
 }
 
