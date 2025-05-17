@@ -124,6 +124,12 @@ class RdbHandler {
         words.push(word);
         return words;
 
+      case "+": {
+        const word = data.slice(1, data.indexOf(this.CRLF));
+        words.push(word);
+        return words;
+      }
+
       default:
         throw new Error("Unhandled RESP data type");
     }
@@ -502,6 +508,21 @@ class RdbHandler {
     // Listen for server
     client.on("data", (data) => {
       console.log("Received from server:", data.toString());
+
+      const decodedWords = this.redisProtocolParser(data.toString());
+
+      if (decodedWords[0] === "PONG") {
+        client.write(
+          this.encodeArrWithBulkStrings([
+            "REPLCONF",
+            "listening-port",
+            `${this.port}`,
+          ])
+        );
+        client.write(
+          this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
+        );
+      }
     });
 
     // Handle disconnection
