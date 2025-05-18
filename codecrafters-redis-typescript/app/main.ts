@@ -48,7 +48,7 @@ class RdbHandler {
 
   handleCommandLineArgs(): void {
     const args = process.argv.slice(2);
-    console.log(`ARGS: ${args}`);
+    console.log(`CMD ARGS: ${args}`);
 
     // --dir and --dbFileName
     if (args.includes("--dir") && args.includes("--dbfilename")) {
@@ -87,7 +87,7 @@ class RdbHandler {
 
         const decodedData = this.redisProtocolParser(data.toString());
 
-        console.log(decodedData);
+        console.log("DECODED DATA: ", decodedData);
         this.handleRedisCommand(decodedData, socket);
       });
     });
@@ -271,8 +271,12 @@ class RdbHandler {
 
           break;
 
+        case "replconf":
+          socket.write(this.encodeSimpleString("OK"));
+          break;
+
         default:
-          console.log("Unhandled command");
+          console.log("Unhandled REDIS command");
           break;
       }
     }
@@ -496,21 +500,25 @@ class RdbHandler {
   }
 
   createClient(host: string, port: number) {
-    console.log(host, port);
+    console.log(`Client replica at host: ${host} and port: ${port}`);
+
     const client: net.Socket = net.createConnection({ host, port }, () => {
       console.log(
-        `Master replica at port: ${this.port} connected to master server`
+        `Client replica connected to master server at port: ${this.port} `
       );
 
       client.write(this.encodeArrWithBulkStrings(["PING"]));
     });
 
+    let numberOfResponses = 0;
     // Listen for server
     client.on("data", (data) => {
-      console.log("Received from server:", data.toString());
+      console.log("Received DATA from MASTER server:", data.toString());
 
       const decodedWords = this.redisProtocolParser(data.toString());
+      console.log("decodedWords", decodedWords);
 
+      // Received PONG
       if (decodedWords[0] === "PONG") {
         client.write(
           this.encodeArrWithBulkStrings([
@@ -522,6 +530,26 @@ class RdbHandler {
         client.write(
           this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
         );
+      }
+
+      // Received OK
+      else if (decodedWords[0] === "OK") {
+        numberOfResponses++;
+        if (numberOfResponses === 2) {
+          client.write(this.encodeArrWithBulkStrings(["PSYNC", "?", "-1"]));
+        }
+      }
+
+      // Received FULLRESYNC
+      else if (
+        decodedWords[0].startsWith("FULLRESYNC") ||
+        decodedWords[0].startsWith("REDIS0011")
+      ) {
+      }
+
+      // ERROR
+      else {
+        throw new Error("Unexpected response");
       }
     });
 
