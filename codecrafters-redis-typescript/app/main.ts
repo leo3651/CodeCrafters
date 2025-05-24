@@ -4,6 +4,7 @@ import { EOpCode, type IInfo } from "./model";
 
 class RdbHandler {
   private readonly CRLF = "\r\n";
+  private readonly WRITE_COMMANDS: string[] = ["SET"];
 
   private STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
   private AUX_KEY_VAL_PAIRS: { [key: string]: string } = {};
@@ -23,27 +24,14 @@ class RdbHandler {
     master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
   };
 
+  private EMPTY_RDB_FILE_HEX: string =
+    "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+
+  private sockets: net.Socket[] = [];
   constructor() {
     this.handleCommandLineArgs();
     this.createServer();
     this.readRdbFileIfExists();
-  }
-
-  readRdbFileIfExists() {
-    if (this.dir && this.dbFileName) {
-      const path = `${this.dir}/${this.dbFileName}`;
-      try {
-        const rdbFileContent = fs.readFileSync(path);
-
-        console.log("RDB FILE BUFFER: ", rdbFileContent);
-        console.log("RDB FILE STRING: ", rdbFileContent.toString());
-        console.log("RDB FILE HEX: ", rdbFileContent.toString("hex"));
-
-        this.parseRdbFile(rdbFileContent);
-      } catch (err) {
-        console.log(`${err} at path "${path}"`);
-      }
-    }
   }
 
   handleCommandLineArgs(): void {
@@ -73,26 +61,77 @@ class RdbHandler {
     }
   }
 
-  createServer(): void {
-    const server: net.Server = net.createServer((socket: net.Socket) => {
-      // Handle connection
-      console.log("New client connected");
+  createClient(host: string, port: number) {
+    console.log(`Client replica at host: ${host} and port: ${port}`);
 
-      socket.on("data", (data) => {
-        console.log(
-          `Received data from CLIENT: ${JSON.stringify(data.toString())}`
-        );
-        this.parseRedisProtocolOffset = 0;
-        this.parseRdbFileOffset = 0;
+    const client: net.Socket = net.createConnection({ host, port }, () => {
+      console.log(
+        `Client replica connected to master server at port: ${this.port} `
+      );
 
-        const decodedData = this.redisProtocolParser(data.toString());
-
-        console.log("DECODED DATA: ", decodedData);
-        this.handleRedisCommand(decodedData, socket);
-      });
+      client.write(this.encodeArrWithBulkStrings(["PING"]));
     });
 
-    server.listen(this.port, "127.0.0.1");
+    let numberOfResponses = 0;
+    // Listen for server
+    client.on("data", (data) => {
+      console.log("Received DATA from MASTER server:", data.toString());
+
+      const decodedWords = this.redisProtocolParser(data.toString());
+      console.log("decodedWords", decodedWords);
+
+      // Received PONG
+      if (decodedWords[0] === "PONG") {
+        client.write(
+          this.encodeArrWithBulkStrings([
+            "REPLCONF",
+            "listening-port",
+            `${this.port}`,
+          ])
+        );
+        client.write(
+          this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
+        );
+      }
+
+      // Received OK
+      else if (decodedWords[0] === "OK") {
+        numberOfResponses++;
+        if (numberOfResponses === 2) {
+          client.write(this.encodeArrWithBulkStrings(["PSYNC", "?", "-1"]));
+        }
+      }
+
+      // Received FULLRESYNC
+      else if (
+        decodedWords[0].startsWith("FULLRESYNC") ||
+        decodedWords[0].startsWith("REDIS0011")
+      ) {
+      }
+
+      // ERROR
+      else {
+        throw new Error("Unexpected response");
+      }
+    });
+
+    // Handle disconnection
+    client.on("end", () => {
+      console.log("Disconnected from server");
+    });
+  }
+
+  encodeArrWithBulkStrings(strArr: string[]): string {
+    let output = `*${strArr.length}\r\n`;
+    for (let i = 0; i < strArr.length; i++) {
+      output += this.encodeBulkString(strArr[i]);
+    }
+
+    return output;
+  }
+
+  encodeBulkString(data: string): string {
+    return `$${data.length}\r\n${data}\r\n`;
   }
 
   redisProtocolParser(data: string): string[] {
@@ -165,6 +204,39 @@ class RdbHandler {
     this.parseRedisProtocolOffset += 2;
 
     return word;
+  }
+
+  createServer(): void {
+    const server: net.Server = net.createServer((socket: net.Socket) => {
+      // Handle connection
+      console.log("New client connected");
+
+      socket.on("data", (data) => {
+        console.log(
+          `Received data from CLIENT: ${JSON.stringify(data.toString())}`
+        );
+        this.parseRedisProtocolOffset = 0;
+        this.parseRdbFileOffset = 0;
+
+        const decodedData = this.redisProtocolParser(data.toString());
+
+        // Propagate commands
+        if (this.WRITE_COMMANDS.includes(decodedData[0])) {
+          this.propagateCommand(decodedData);
+        }
+
+        console.log("DECODED DATA: ", decodedData);
+        this.handleRedisCommand(decodedData, socket);
+      });
+    });
+
+    server.listen(this.port, "127.0.0.1");
+  }
+
+  propagateCommand(decodedData: string[]) {
+    this.sockets.forEach((socket) =>
+      socket.write(this.encodeArrWithBulkStrings(decodedData))
+    );
   }
 
   handleRedisCommand(decodedData: string[], socket: net.Socket): void {
@@ -273,17 +345,33 @@ class RdbHandler {
 
         case "replconf":
           socket.write(this.encodeSimpleString("OK"));
+
+          break;
+
+        case "psync":
+          socket.write(
+            this.encodeSimpleString(
+              `FULLRESYNC ${this.info.master_replid} ${this.info.master_repl_offset}`
+            )
+          );
+
+          // Send empty RDB file
+          const buf = Buffer.from(this.EMPTY_RDB_FILE_HEX, "hex");
+          const finalBuf = Buffer.concat([
+            Buffer.from(`$${buf.length}\r\n`),
+            buf,
+          ]);
+          socket.write(finalBuf);
+
+          this.sockets.push(socket);
+
           break;
 
         default:
-          console.log("Unhandled REDIS command");
+          console.log(`Unhandled REDIS command ${decodedData[i]}`);
           break;
       }
     }
-  }
-
-  encodeBulkString(data: string): string {
-    return `$${data.length}\r\n${data}\r\n`;
   }
 
   encodeSimpleString(data: string): string {
@@ -294,13 +382,46 @@ class RdbHandler {
     return "$-1\r\n";
   }
 
-  encodeArrWithBulkStrings(strArr: string[]): string {
-    let output = `*${strArr.length}\r\n`;
-    for (let i = 0; i < strArr.length; i++) {
-      output += this.encodeBulkString(strArr[i]);
-    }
+  handleExpiry(
+    expireDate: number,
+    obj: { [key: string]: string },
+    key: string
+  ) {
+    const now = Date.now();
+    const expireTime = expireDate - now;
 
-    return output;
+    if (expireTime <= 0) {
+      delete obj[key];
+    } else {
+      setTimeout(() => {
+        delete obj[key];
+      }, expireTime);
+    }
+  }
+
+  createStringFromInfo() {
+    let result = "";
+    Object.keys(this.info).forEach(
+      (key) => (result += `${key}:${(this.info as any)[key]}`)
+    );
+    return result;
+  }
+
+  readRdbFileIfExists() {
+    if (this.dir && this.dbFileName) {
+      const path = `${this.dir}/${this.dbFileName}`;
+      try {
+        const rdbFileContent = fs.readFileSync(path);
+
+        console.log("RDB FILE BUFFER: ", rdbFileContent);
+        console.log("RDB FILE STRING: ", rdbFileContent.toString());
+        console.log("RDB FILE HEX: ", rdbFileContent.toString("hex"));
+
+        this.parseRdbFile(rdbFileContent);
+      } catch (err) {
+        console.log(`${err} at path "${path}"`);
+      }
+    }
   }
 
   parseRdbFile(data: Buffer): void {
@@ -472,91 +593,6 @@ class RdbHandler {
       this.parseRdbFileOffset += value;
       return data.slice(startingOffset, startingOffset + value);
     }
-  }
-
-  handleExpiry(
-    expireDate: number,
-    obj: { [key: string]: string },
-    key: string
-  ) {
-    const now = Date.now();
-    const expireTime = expireDate - now;
-
-    if (expireTime <= 0) {
-      delete obj[key];
-    } else {
-      setTimeout(() => {
-        delete obj[key];
-      }, expireTime);
-    }
-  }
-
-  createStringFromInfo() {
-    let result = "";
-    Object.keys(this.info).forEach(
-      (key) => (result += `${key}:${(this.info as any)[key]}`)
-    );
-    return result;
-  }
-
-  createClient(host: string, port: number) {
-    console.log(`Client replica at host: ${host} and port: ${port}`);
-
-    const client: net.Socket = net.createConnection({ host, port }, () => {
-      console.log(
-        `Client replica connected to master server at port: ${this.port} `
-      );
-
-      client.write(this.encodeArrWithBulkStrings(["PING"]));
-    });
-
-    let numberOfResponses = 0;
-    // Listen for server
-    client.on("data", (data) => {
-      console.log("Received DATA from MASTER server:", data.toString());
-
-      const decodedWords = this.redisProtocolParser(data.toString());
-      console.log("decodedWords", decodedWords);
-
-      // Received PONG
-      if (decodedWords[0] === "PONG") {
-        client.write(
-          this.encodeArrWithBulkStrings([
-            "REPLCONF",
-            "listening-port",
-            `${this.port}`,
-          ])
-        );
-        client.write(
-          this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
-        );
-      }
-
-      // Received OK
-      else if (decodedWords[0] === "OK") {
-        numberOfResponses++;
-        if (numberOfResponses === 2) {
-          client.write(this.encodeArrWithBulkStrings(["PSYNC", "?", "-1"]));
-        }
-      }
-
-      // Received FULLRESYNC
-      else if (
-        decodedWords[0].startsWith("FULLRESYNC") ||
-        decodedWords[0].startsWith("REDIS0011")
-      ) {
-      }
-
-      // ERROR
-      else {
-        throw new Error("Unexpected response");
-      }
-    });
-
-    // Handle disconnection
-    client.on("end", () => {
-      console.log("Disconnected from server");
-    });
   }
 }
 
