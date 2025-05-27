@@ -1,11 +1,9 @@
 import * as net from "net";
 import fs from "fs";
 import { EOpCode, type IInfo } from "./model";
+import { buffer } from "stream/consumers";
 
 class RdbHandler {
-  private readonly CRLF = "\r\n";
-  private readonly WRITE_COMMANDS: string[] = ["SET"];
-
   private STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
   private AUX_KEY_VAL_PAIRS: { [key: string]: string } = {};
   private KEY_VAL_WITHOUT_EXPIRY: { [key: string]: string } = {};
@@ -15,7 +13,6 @@ class RdbHandler {
   private dbFileName: string = "";
 
   private parseRdbFileOffset: number = 0;
-  private parseRedisProtocolOffset: number = 0;
 
   private port: number = 6379;
   private info: IInfo = {
@@ -64,6 +61,9 @@ class RdbHandler {
   createClient(host: string, port: number) {
     console.log(`Client replica at host: ${host} and port: ${port}`);
 
+    let data: Buffer = Buffer.alloc(0);
+    let numberOfResponses = 0;
+
     const client: net.Socket = net.createConnection({ host, port }, () => {
       console.log(
         `Client replica connected to master server at port: ${this.port} `
@@ -72,46 +72,65 @@ class RdbHandler {
       client.write(this.encodeArrWithBulkStrings(["PING"]));
     });
 
-    let numberOfResponses = 0;
     // Listen for server
-    client.on("data", (data) => {
-      console.log("Received DATA from MASTER server:", data.toString());
+    client.on("data", (chunkOfData) => {
+      console.log(
+        `Received CHUNK OF DATA from MASTER server: "${chunkOfData.toString()}"`
+      );
 
-      const decodedWords = this.redisProtocolParser(data.toString());
-      console.log("decodedWords", decodedWords);
+      data = Buffer.concat([data, chunkOfData]);
+      const decodedData: string[][] = this.readRedisProtocol(data.toString());
 
-      // Received PONG
-      if (decodedWords[0] === "PONG") {
-        client.write(
-          this.encodeArrWithBulkStrings([
-            "REPLCONF",
-            "listening-port",
-            `${this.port}`,
-          ])
-        );
-        client.write(
-          this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
-        );
+      console.log("decodedData", decodedData);
+      console.log(`Received DATA from MASTER server: "${data.toString()}"`);
+      if (decodedData.length === 0) {
+        return;
       }
+      data = Buffer.alloc(0);
 
-      // Received OK
-      else if (decodedWords[0] === "OK") {
-        numberOfResponses++;
-        if (numberOfResponses === 2) {
-          client.write(this.encodeArrWithBulkStrings(["PSYNC", "?", "-1"]));
+      for (let i = 0; i < decodedData.length; i++) {
+        console.log(decodedData[i][0]);
+        // Received PONG
+        if (decodedData[i][0] === "PONG") {
+          client.write(
+            this.encodeArrWithBulkStrings([
+              "REPLCONF",
+              "listening-port",
+              `${this.port}`,
+            ])
+          );
+          client.write(
+            this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
+          );
         }
-      }
 
-      // Received FULLRESYNC
-      else if (
-        decodedWords[0].startsWith("FULLRESYNC") ||
-        decodedWords[0].startsWith("REDIS0011")
-      ) {
-      }
+        // Received OK
+        else if (decodedData[i][0] === "OK") {
+          numberOfResponses++;
+          if (numberOfResponses === 2) {
+            client.write(this.encodeArrWithBulkStrings(["PSYNC", "?", "-1"]));
+          }
+        }
 
-      // ERROR
-      else {
-        throw new Error("Unexpected response");
+        // Received FULLRESYNC
+        else if (
+          decodedData[i][0].startsWith("FULLRESYNC") ||
+          decodedData[i][0].startsWith("REDIS0011")
+        ) {
+        }
+
+        // Received SET
+        else if (decodedData[i][0] === "SET") {
+          const key = decodedData[i][1];
+          const val = decodedData[i][2];
+
+          this.STORED_KEY_VAL_PAIRS[key] = val;
+        }
+
+        // ERROR
+        else {
+          throw new Error("Unexpected response");
+        }
       }
     });
 
@@ -134,98 +153,140 @@ class RdbHandler {
     return `$${data.length}\r\n${data}\r\n`;
   }
 
-  redisProtocolParser(data: string): string[] {
-    const type: string = data[this.parseRedisProtocolOffset];
-    const words: string[] = [];
+  readRedisProtocol(data: string) {
+    let i = 0;
+    const decodedData: string[][] = [];
 
-    switch (type) {
-      case "*":
-        this.parseRedisProtocolOffset++;
-
-        const arrLenAsStr = data.slice(
-          this.parseRedisProtocolOffset,
-          data.indexOf(this.CRLF, this.parseRedisProtocolOffset)
-        );
-        const arrLen = Number.parseInt(arrLenAsStr);
-
-        this.parseRedisProtocolOffset += arrLenAsStr.length;
-        this.parseRedisProtocolOffset += 2;
-
-        for (let i = 0; i < arrLen; i++) {
-          const word = this.redisProtocolParser(data);
-          words.push(...word);
-        }
-
-        return words;
-
-      case "$":
-        const word = this.readRedisProtocolLine(data);
-        words.push(word);
-        return words;
-
-      case "+": {
-        const word = data.slice(1, data.indexOf(this.CRLF));
-        words.push(word);
-        return words;
+    try {
+      while (i < data.length - 1) {
+        const { newDecodedData, newIndex } = this.redisProtocolParser(data, i);
+        decodedData.push(newDecodedData);
+        i = newIndex;
       }
 
-      default:
-        throw new Error("Unhandled RESP data type");
+      return decodedData;
+    } catch (err) {
+      console.log(err);
+      return [];
     }
   }
 
-  readRedisProtocolLine(data: string): string {
-    this.parseRedisProtocolOffset++;
+  redisProtocolParser(
+    data: string,
+    i: number
+  ): { newDecodedData: string[]; newIndex: number } {
+    const decodedData: string[] = [];
 
-    const firstCRLFIndex = data.indexOf(
-      this.CRLF,
-      this.parseRedisProtocolOffset
-    );
+    while (i < data.length - 1) {
+      const type = data[i];
+
+      // Resp array
+      if (type === "*") {
+        i++;
+        const start = i;
+        while (data[i] !== "\r") {
+          i++;
+
+          if (i >= data.length) {
+            throw new Error("Invalid Resp array");
+          }
+        }
+
+        const size = data.slice(start, i);
+        i += size.length;
+        i++;
+
+        for (let j = 0; j < Number.parseInt(size); j++) {
+          const { newDecodedData, newIndex } = this.redisProtocolParser(
+            data,
+            i
+          );
+          decodedData.push(...newDecodedData);
+          i = newIndex;
+        }
+
+        return { newDecodedData: decodedData, newIndex: i };
+      }
+
+      // Bulk string
+      else if (type === "$") {
+        const { word, i: newIndex } = this.readRedisProtocolLine(data, i);
+        i = newIndex;
+        decodedData.push(word);
+        return { newDecodedData: decodedData, newIndex: i };
+      }
+
+      // Simple string
+      else if (type === "+") {
+        i++;
+        const nextCRLF = "\r\n";
+        const endOfString = data.indexOf(nextCRLF, i);
+
+        if (endOfString === -1) {
+          throw new Error("Invalid simple string");
+        }
+
+        const word = data.slice(i, endOfString);
+        i += word.length + 2;
+        decodedData.push(word);
+        return { newDecodedData: decodedData, newIndex: i };
+      } else {
+        throw new Error("Unhandled Resp type");
+      }
+    }
+
+    throw new Error("Could not parse correctly");
+  }
+
+  readRedisProtocolLine(data: string, i: number): { word: string; i: number } {
+    i++;
+
+    const firstCRLFIndex = data.indexOf("\r\n", i);
 
     if (firstCRLFIndex === -1) {
       throw new Error("Invalid frame");
     }
 
-    const lengthAsStr = data.slice(
-      this.parseRedisProtocolOffset,
-      firstCRLFIndex
-    );
+    const lengthAsStr = data.slice(i, firstCRLFIndex);
     const len = Number.parseInt(lengthAsStr);
 
-    this.parseRedisProtocolOffset += lengthAsStr.length;
-    this.parseRedisProtocolOffset += 2;
+    i += lengthAsStr.length;
+    i += 2;
 
-    const word = data.slice(
-      this.parseRedisProtocolOffset,
-      this.parseRedisProtocolOffset + len
-    );
+    const word = data.slice(i, i + len);
 
-    this.parseRedisProtocolOffset += len;
-    this.parseRedisProtocolOffset += 2;
+    i += len;
+    i += 2;
 
-    return word;
+    return { word, i };
   }
 
   createServer(): void {
+    let data = Buffer.alloc(0);
+
     const server: net.Server = net.createServer((socket: net.Socket) => {
       // Handle connection
       console.log("New client connected");
 
-      socket.on("data", (data) => {
+      socket.on("data", (chunkOfData) => {
+        console.log(
+          `Received chunk of data from CLIENT: ${JSON.stringify(
+            chunkOfData.toString()
+          )}`
+        );
+
+        data = Buffer.concat([data, chunkOfData]);
+        const decodedData = this.readRedisProtocol(data.toString());
         console.log(
           `Received data from CLIENT: ${JSON.stringify(data.toString())}`
         );
-        this.parseRedisProtocolOffset = 0;
-        this.parseRdbFileOffset = 0;
 
-        const decodedData = this.redisProtocolParser(data.toString());
-
-        // Propagate commands
-        if (this.WRITE_COMMANDS.includes(decodedData[0])) {
-          this.propagateCommand(decodedData);
+        if (decodedData.length === 0) {
+          return;
         }
-
+        data = Buffer.alloc(0);
         console.log("DECODED DATA: ", decodedData);
+
         this.handleRedisCommand(decodedData, socket);
       });
     });
@@ -233,18 +294,11 @@ class RdbHandler {
     server.listen(this.port, "127.0.0.1");
   }
 
-  propagateCommand(decodedData: string[]) {
-    this.sockets.forEach((socket) =>
-      socket.write(this.encodeArrWithBulkStrings(decodedData))
-    );
-  }
-
-  handleRedisCommand(decodedData: string[], socket: net.Socket): void {
+  handleRedisCommand(decodedData: string[][], socket: net.Socket): void {
     for (let i = 0; i < decodedData.length; i++) {
-      switch (decodedData[i].toLowerCase()) {
+      switch (decodedData[i][0].toLowerCase()) {
         case "echo":
-          i++;
-          const arg = decodedData[i];
+          const arg = decodedData[i][1];
           socket.write(this.encodeBulkString(arg));
 
           break;
@@ -255,18 +309,13 @@ class RdbHandler {
           break;
 
         case "set":
-          i++;
-
-          const key = decodedData[i];
-          const val = decodedData[i + 1];
+          const key = decodedData[i][1];
+          const val = decodedData[i][2];
           this.STORED_KEY_VAL_PAIRS[key] = val;
 
-          i += 2;
-
           // Handle expiry
-          if (decodedData[i]?.toLowerCase() === "px") {
-            i++;
-            const expiryTime = Number.parseInt(decodedData[i]);
+          if (decodedData[i][3]?.toLowerCase() === "px") {
+            const expiryTime = Number.parseInt(decodedData[i][4]);
 
             setTimeout(() => {
               delete this.STORED_KEY_VAL_PAIRS[key];
@@ -275,20 +324,20 @@ class RdbHandler {
 
           socket.write(this.encodeSimpleString("OK"));
 
+          this.propagateCommand(decodedData[i]);
+
           break;
 
         case "get":
-          i++;
-
           if (
-            this.STORED_KEY_VAL_PAIRS[decodedData[i]] ||
-            this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i]] ||
-            this.KEY_VAL_WITH_EXPIRY[decodedData[i]]
+            this.STORED_KEY_VAL_PAIRS[decodedData[i][1]] ||
+            this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i][1]] ||
+            this.KEY_VAL_WITH_EXPIRY[decodedData[i][1]]
           ) {
             const value =
-              this.STORED_KEY_VAL_PAIRS[decodedData[i]] ||
-              this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i]] ||
-              this.KEY_VAL_WITH_EXPIRY[decodedData[i]];
+              this.STORED_KEY_VAL_PAIRS[decodedData[i][1]] ||
+              this.KEY_VAL_WITHOUT_EXPIRY[decodedData[i][1]] ||
+              this.KEY_VAL_WITH_EXPIRY[decodedData[i][1]];
 
             socket.write(this.encodeBulkString(value));
           } else {
@@ -298,13 +347,10 @@ class RdbHandler {
           break;
 
         case "config":
-          i++;
-
-          if (decodedData[i]?.toLowerCase() === "get") {
-            i++;
-            if (decodedData[i] === "dir") {
+          if (decodedData[i][1]?.toLowerCase() === "get") {
+            if (decodedData[i][2] === "dir") {
               socket.write(this.encodeArrWithBulkStrings(["dir", this.dir]));
-            } else if (decodedData[i] === "dbfilename") {
+            } else if (decodedData[i][2] === "dbfilename") {
               socket.write(
                 this.encodeArrWithBulkStrings(["dbfilename", this.dbFileName])
               );
@@ -318,9 +364,7 @@ class RdbHandler {
           break;
 
         case "keys":
-          i++;
-
-          if (decodedData[i] === "*") {
+          if (decodedData[i][1] === "*") {
             socket.write(
               this.encodeArrWithBulkStrings([
                 ...Object.keys(this.KEY_VAL_WITHOUT_EXPIRY),
@@ -334,8 +378,7 @@ class RdbHandler {
           break;
 
         case "info":
-          i++;
-          if (decodedData[i] === "replication") {
+          if (decodedData[i][1] === "replication") {
             socket.write(this.encodeBulkString(this.createStringFromInfo()));
           } else {
             throw new Error("Unhandled info argument");
@@ -372,6 +415,12 @@ class RdbHandler {
           break;
       }
     }
+  }
+
+  propagateCommand(decodedData: string[]) {
+    this.sockets.forEach((socket) =>
+      socket.write(this.encodeArrWithBulkStrings(decodedData))
+    );
   }
 
   encodeSimpleString(data: string): string {
@@ -411,6 +460,8 @@ class RdbHandler {
     if (this.dir && this.dbFileName) {
       const path = `${this.dir}/${this.dbFileName}`;
       try {
+        this.parseRdbFileOffset = 0;
+
         const rdbFileContent = fs.readFileSync(path);
 
         console.log("RDB FILE BUFFER: ", rdbFileContent);
@@ -621,3 +672,11 @@ const handler = new RdbHandler();
 //     69, 250, 87, 10,
 //   ])
 // );
+console.log(
+  handler.readRedisProtocol(
+    "*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n"
+  )
+);
+console.log(
+  handler.readRedisProtocol("*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n")
+);
