@@ -1,7 +1,6 @@
 import * as net from "net";
 import fs from "fs";
 import { EOpCode, type IInfo } from "./model";
-import { buffer } from "stream/consumers";
 
 class RdbHandler {
   private STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
@@ -74,12 +73,17 @@ class RdbHandler {
 
     // Listen for server
     client.on("data", (chunkOfData) => {
-      console.log(
-        `Received CHUNK OF DATA from MASTER server: "${chunkOfData.toString()}"`
+      process.stdout.write(
+        `Received CHUNK OF DATA from MASTER server: "${chunkOfData
+          .toString("binary")
+          .replaceAll("\n", "\\n")
+          .replaceAll("\r", "\\r")}"\n`
       );
 
       data = Buffer.concat([data, chunkOfData]);
-      const decodedData: string[][] = this.readRedisProtocol(data.toString());
+      const decodedData: string[][] = this.readRedisProtocol(
+        data.toString("binary")
+      );
 
       console.log("decodedData", decodedData);
       console.log(`Received DATA from MASTER server: "${data.toString()}"`);
@@ -125,6 +129,11 @@ class RdbHandler {
           const val = decodedData[i][2];
 
           this.STORED_KEY_VAL_PAIRS[key] = val;
+        }
+
+        // Received REPLCONF
+        else if (decodedData[i][0] === "REPLCONF") {
+          client.write(this.encodeArrWithBulkStrings(["REPLCONF", "ACK", "0"]));
         }
 
         // ERROR
@@ -256,7 +265,10 @@ class RdbHandler {
     const word = data.slice(i, i + len);
 
     i += len;
-    i += 2;
+
+    if (data[i] === "\r") {
+      i += 2;
+    }
 
     return { word, i };
   }
@@ -672,11 +684,16 @@ const handler = new RdbHandler();
 //     69, 250, 87, 10,
 //   ])
 // );
-console.log(
-  handler.readRedisProtocol(
-    "*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n"
-  )
-);
-console.log(
-  handler.readRedisProtocol("*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n")
-);
+// console.log(
+//   handler.readRedisProtocol(
+//     "*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n"
+//   )
+// );
+// console.log(
+//   handler.readRedisProtocol("*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n")
+// );
+// console.log(
+//   handler.readRedisProtocol(
+//     "+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0\r\n$88\r\nREDIS0011ú   redis-ver7.2.0ú\nredis-bitsÀ@úctimeÂ¼eused-memÂ°Äaof-baseÀÿðn;þÀÿZ¢*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"
+//   )
+// );
