@@ -24,6 +24,9 @@ class RdbHandler {
     "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
   private sockets: net.Socket[] = [];
+
+  private totalNumOfReplicas: number = 0;
+
   constructor() {
     this.handleCommandLineArgs();
     this.createServer();
@@ -62,6 +65,8 @@ class RdbHandler {
 
     let data: Buffer = Buffer.alloc(0);
     let numberOfResponses = 0;
+    let startTrackingOffset = false;
+    let numberOfBytesProcessed = 0;
 
     const client: net.Socket = net.createConnection({ host, port }, () => {
       console.log(
@@ -93,7 +98,6 @@ class RdbHandler {
       data = Buffer.alloc(0);
 
       for (let i = 0; i < decodedData.length; i++) {
-        console.log(decodedData[i][0]);
         // Received PONG
         if (decodedData[i][0] === "PONG") {
           client.write(
@@ -106,6 +110,10 @@ class RdbHandler {
           client.write(
             this.encodeArrWithBulkStrings(["REPLCONF", "capa", "psync2"])
           );
+        }
+
+        // Received PING
+        else if (decodedData[i][0] === "PING") {
         }
 
         // Received OK
@@ -133,12 +141,25 @@ class RdbHandler {
 
         // Received REPLCONF
         else if (decodedData[i][0] === "REPLCONF") {
-          client.write(this.encodeArrWithBulkStrings(["REPLCONF", "ACK", "0"]));
+          client.write(
+            this.encodeArrWithBulkStrings([
+              "REPLCONF",
+              "ACK",
+              `${numberOfBytesProcessed}`,
+            ])
+          );
+          startTrackingOffset = true;
         }
 
         // ERROR
         else {
           throw new Error("Unexpected response");
+        }
+
+        if (startTrackingOffset) {
+          numberOfBytesProcessed += this.encodeArrWithBulkStrings(
+            decodedData[i]
+          ).length;
         }
       }
     });
@@ -419,12 +440,16 @@ class RdbHandler {
           socket.write(finalBuf);
 
           this.sockets.push(socket);
+          this.totalNumOfReplicas++;
 
+          break;
+
+        case "wait":
+          socket.write(`:${this.totalNumOfReplicas}\r\n`);
           break;
 
         default:
-          console.log(`Unhandled REDIS command ${decodedData[i]}`);
-          break;
+          throw new Error(`Unhandled REDIS command ${decodedData[i]}`);
       }
     }
   }
