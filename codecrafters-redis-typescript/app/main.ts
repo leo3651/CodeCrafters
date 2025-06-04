@@ -1,6 +1,6 @@
 import * as net from "net";
 import fs from "fs";
-import { EOpCode, type IInfo } from "./model";
+import { EOpCode, type IReplicaInfo, type IInfo } from "./model";
 
 class RdbHandler {
   private STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
@@ -23,9 +23,7 @@ class RdbHandler {
   private EMPTY_RDB_FILE_HEX: string =
     "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
-  private sockets: net.Socket[] = [];
-
-  private totalNumOfReplicas: number = 0;
+  private replicasSockets: IReplicaInfo[] = [];
 
   constructor() {
     this.handleCommandLineArgs();
@@ -301,7 +299,7 @@ class RdbHandler {
       // Handle connection
       console.log("New client connected");
 
-      socket.on("data", (chunkOfData) => {
+      socket.on("data", async (chunkOfData) => {
         console.log(
           `Received chunk of data from CLIENT: ${JSON.stringify(
             chunkOfData.toString()
@@ -320,14 +318,17 @@ class RdbHandler {
         data = Buffer.alloc(0);
         console.log("DECODED DATA: ", decodedData);
 
-        this.handleRedisCommand(decodedData, socket);
+        await this.handleRedisCommand(decodedData, socket);
       });
     });
 
     server.listen(this.port, "127.0.0.1");
   }
 
-  handleRedisCommand(decodedData: string[][], socket: net.Socket): void {
+  async handleRedisCommand(
+    decodedData: string[][],
+    socket: net.Socket
+  ): Promise<void> {
     for (let i = 0; i < decodedData.length; i++) {
       switch (decodedData[i][0].toLowerCase()) {
         case "echo":
@@ -420,7 +421,20 @@ class RdbHandler {
           break;
 
         case "replconf":
-          socket.write(this.encodeSimpleString("OK"));
+          if (decodedData[i][1] === "ACK") {
+            const socketInfo = this.replicasSockets.find(
+              (sockInfo) => sockInfo.socket === socket
+            )!;
+
+            socketInfo.processedBytes = Number.parseInt(decodedData[i][2]);
+            socketInfo.propagatedBytes += this.encodeArrWithBulkStrings([
+              "REPLCONF",
+              "GETACK",
+              "*",
+            ]).length;
+          } else {
+            socket.write(this.encodeSimpleString("OK"));
+          }
 
           break;
 
@@ -439,13 +453,65 @@ class RdbHandler {
           ]);
           socket.write(finalBuf);
 
-          this.sockets.push(socket);
-          this.totalNumOfReplicas++;
+          this.replicasSockets.push({
+            socket,
+            processedBytes: 0,
+            propagatedBytes: 0,
+          });
 
           break;
 
         case "wait":
-          socket.write(`:${this.totalNumOfReplicas}\r\n`);
+          await new Promise((resolve) => {
+            const numOfAckReplicasNeeded = Number.parseInt(decodedData[i][1]);
+            const expireTime = Number.parseInt(decodedData[i][2]);
+
+            const askForACKInterval = setInterval(() => {
+              this.replicasSockets.forEach((socketInfo) => {
+                const respEncodedCommand = this.encodeArrWithBulkStrings([
+                  "REPLCONF",
+                  "GETACK",
+                  "*",
+                ]);
+                socketInfo.socket.write(respEncodedCommand);
+              });
+            }, 20);
+
+            const checkIfWaitResolvedInterval = setInterval(() => {
+              const numOfAckReplicas = this.replicasSockets.filter(
+                (socketInfo) =>
+                  socketInfo.propagatedBytes === socketInfo.processedBytes ||
+                  socketInfo.processedBytes + 37 === socketInfo.propagatedBytes
+              ).length;
+              if (numOfAckReplicas >= numOfAckReplicasNeeded) {
+                clearInterval(checkIfWaitResolvedInterval);
+                clearInterval(askForACKInterval);
+                clearTimeout(resolveTimeout);
+
+                resolve(socket.write(`:${numOfAckReplicas}\r\n`));
+              }
+            }, 10);
+
+            const resolveTimeout = setTimeout(() => {
+              clearInterval(checkIfWaitResolvedInterval);
+              clearInterval(askForACKInterval);
+              clearTimeout(resolveTimeout);
+
+              const numOfAckReplicas = this.replicasSockets.filter(
+                (socketInfo) =>
+                  socketInfo.propagatedBytes === socketInfo.processedBytes ||
+                  socketInfo.processedBytes + 37 === socketInfo.propagatedBytes
+              ).length;
+              this.replicasSockets.forEach((socketInfo) => {
+                console.log(
+                  `${socketInfo.propagatedBytes}/${socketInfo.processedBytes}`
+                );
+              });
+
+              resolve(socket.write(`:${numOfAckReplicas}\r\n`));
+            }, expireTime);
+          });
+
           break;
 
         default:
@@ -455,9 +521,12 @@ class RdbHandler {
   }
 
   propagateCommand(decodedData: string[]) {
-    this.sockets.forEach((socket) =>
-      socket.write(this.encodeArrWithBulkStrings(decodedData))
-    );
+    this.replicasSockets.forEach((sockInfo) => {
+      const respEncodedCommand = this.encodeArrWithBulkStrings(decodedData);
+      sockInfo.socket.write(respEncodedCommand);
+      sockInfo.propagatedBytes += respEncodedCommand.length;
+      console.log(`${sockInfo.propagatedBytes}/${sockInfo.processedBytes}`);
+    });
   }
 
   encodeSimpleString(data: string): string {

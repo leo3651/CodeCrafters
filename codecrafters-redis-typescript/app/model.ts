@@ -1,3 +1,5 @@
+import * as net from "net";
+
 export enum EOpCode {
   EOF = 0xff,
   SELECTDB = 0xfe,
@@ -11,4 +13,10 @@ export interface IInfo {
   role: string;
   master_replid: string;
   master_repl_offset: number;
+}
+
+export interface IReplicaInfo {
+  socket: net.Socket;
+  propagatedBytes: number;
+  processedBytes: number;
 }
