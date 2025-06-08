@@ -15,8 +15,9 @@ export interface IInfo {
   master_repl_offset: number;
 }
 
-export interface IReplicaInfo {
+export interface ISocketInfo {
   socket: net.Socket;
   propagatedBytes: number;
   processedBytes: number;
+  numberOfResponses: number;
 }
