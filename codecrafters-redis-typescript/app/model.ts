@@ -21,3 +21,8 @@ export interface ISocketInfo {
   processedBytes: number;
   numberOfResponses: number;
 }
+
+export interface IStream {
+  streamID: string;
+  [key: string]: string;
+}

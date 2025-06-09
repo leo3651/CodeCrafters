@@ -1,5 +1,5 @@
 import * as net from "net";
-import type { IInfo, ISocketInfo } from "./model";
+import type { IInfo, ISocketInfo, IStream } from "./model";
 import { redisProtocolEncoder } from "./redisProtocolEncoder";
 import { rdbFileParser } from "./rdbFileParser";
 
@@ -11,6 +11,8 @@ class RedisCommandHandler {
   };
 
   public STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
+  private STORED_STREAMS: { [key: string]: IStream } = {};
+
   private replicasSockets: ISocketInfo[] = [];
   private clientSockets: ISocketInfo[] = [];
 
@@ -278,6 +280,41 @@ class RedisCommandHandler {
               resolve(socket.write(`:${numOfAckReplicas}\r\n`));
             }, expireTime);
           });
+
+          break;
+
+        case "type":
+          {
+            const key = decodedData[i][1];
+            const value = this.STORED_KEY_VAL_PAIRS[key];
+            const stream = this.STORED_STREAMS[key];
+
+            if (value) {
+              socket.write(
+                redisProtocolEncoder.encodeSimpleString(typeof value)
+              );
+            } else if (stream) {
+              socket.write(redisProtocolEncoder.encodeSimpleString("stream"));
+            } else {
+              socket.write(redisProtocolEncoder.encodeSimpleString("none"));
+            }
+          }
+          break;
+
+        case "xadd":
+          const streamKey = decodedData[i][1];
+          const streamID = decodedData[i][2];
+
+          this.STORED_STREAMS[streamKey] = { streamID };
+
+          for (let j = 3; j < decodedData[i].length; j++) {
+            this.STORED_STREAMS[streamKey][decodedData[i][j]] =
+              decodedData[i][j + 1];
+            j++;
+          }
+
+          console.log("STREAMS: ", this.STORED_STREAMS);
+          socket.write(redisProtocolEncoder.encodeSimpleString(streamID));
 
           break;
 
