@@ -323,6 +323,7 @@ class RedisCommandHandler {
             streamID,
             streamKey
           );
+          streamID = `${streamIDMilliSecondsTime}-${sequenceNumber}`;
 
           const keyValPairs = this.parseKeyValPairs(decodedData[i]);
           const streamEntry: IStreamEntry = {
@@ -409,14 +410,18 @@ class RedisCommandHandler {
         const topSeqMs = topStream?.streamIDMilliSecondsTime;
 
         sequenceNumber =
-          topStream && topSeqNum && topSeqMs === streamIDMilliSecondsTime
+          topStream &&
+          topSeqNum !== undefined &&
+          topSeqMs === streamIDMilliSecondsTime
             ? topSeqNum + 1
+            : streamIDMilliSecondsTime === 0
+            ? 1
             : 0;
       } else {
         sequenceNumber = Number.parseInt(val2);
       }
 
-      return [sequenceNumber, streamIDMilliSecondsTime];
+      return [streamIDMilliSecondsTime, sequenceNumber];
     } catch (err) {
       throw new Error("Invalid stream ID");
     }
