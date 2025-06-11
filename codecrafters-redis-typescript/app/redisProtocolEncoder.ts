@@ -7,6 +7,10 @@ class RedisProtocolEncoder {
     return `+${data}\r\n`;
   }
 
+  public encodeSimpleError(data: string): string {
+    return `-${data}\r\n`;
+  }
+
   public nullBulkString(): string {
     return "$-1\r\n";
   }

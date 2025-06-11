@@ -22,7 +22,9 @@ export interface ISocketInfo {
   numberOfResponses: number;
 }
 
-export interface IStream {
+export interface IStreamEntry {
   streamID: string;
-  [key: string]: string;
+  streamIDMilliSecondsTime: number;
+  sequenceNumber: number;
+  [key: string]: string | number;
 }

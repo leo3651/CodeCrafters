@@ -1,5 +1,5 @@
 import * as net from "net";
-import type { IInfo, ISocketInfo, IStream } from "./model";
+import type { IInfo, ISocketInfo, IStreamEntry } from "./model";
 import { redisProtocolEncoder } from "./redisProtocolEncoder";
 import { rdbFileParser } from "./rdbFileParser";
 
@@ -11,7 +11,7 @@ class RedisCommandHandler {
   };
 
   public STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
-  private STORED_STREAMS: { [key: string]: IStream } = {};
+  private STORED_STREAMS: { [key: string]: IStreamEntry[] } = {};
 
   private replicasSockets: ISocketInfo[] = [];
   private clientSockets: ISocketInfo[] = [];
@@ -303,15 +303,36 @@ class RedisCommandHandler {
 
         case "xadd":
           const streamKey = decodedData[i][1];
-          const streamID = decodedData[i][2];
+          let streamID = decodedData[i][2];
 
-          this.STORED_STREAMS[streamKey] = { streamID };
-
-          for (let j = 3; j < decodedData[i].length; j++) {
-            this.STORED_STREAMS[streamKey][decodedData[i][j]] =
-              decodedData[i][j + 1];
-            j++;
+          if (streamID === "*") {
+            streamID = this.createStreamID(streamKey);
           }
+
+          const isValid = this.checkStreamValidity(
+            streamID,
+            streamKey,
+            socket,
+            !!decodedData[i][3]
+          );
+          if (!isValid) {
+            break;
+          }
+
+          const [streamIDMilliSecondsTime, sequenceNumber] = this.parseStreamID(
+            streamID,
+            streamKey
+          );
+
+          const keyValPairs = this.parseKeyValPairs(decodedData[i]);
+          const streamEntry: IStreamEntry = {
+            streamID,
+            streamIDMilliSecondsTime,
+            sequenceNumber,
+            ...keyValPairs,
+          };
+          this.STORED_STREAMS[streamKey] ??= [];
+          this.STORED_STREAMS[streamKey].push(streamEntry);
 
           console.log("STREAMS: ", this.STORED_STREAMS);
           socket.write(redisProtocolEncoder.encodeSimpleString(streamID));
@@ -373,6 +394,124 @@ class RedisCommandHandler {
       )!;
     } else {
       return this.clientSockets.find((sockInfo) => sockInfo.socket === socket)!;
+    }
+  }
+
+  private parseStreamID(streamID: string, streamKey: string): number[] {
+    try {
+      const [val1, val2] = streamID.split("-");
+      const streamIDMilliSecondsTime = Number.parseInt(val1);
+      let sequenceNumber: number;
+
+      if (val2 === "*") {
+        const topStream = this.STORED_STREAMS[streamKey]?.slice().pop();
+        const topSeqNum = topStream?.sequenceNumber;
+        const topSeqMs = topStream?.streamIDMilliSecondsTime;
+
+        sequenceNumber =
+          topStream && topSeqNum && topSeqMs === streamIDMilliSecondsTime
+            ? topSeqNum + 1
+            : 0;
+      } else {
+        sequenceNumber = Number.parseInt(val2);
+      }
+
+      return [sequenceNumber, streamIDMilliSecondsTime];
+    } catch (err) {
+      throw new Error("Invalid stream ID");
+    }
+  }
+
+  private parseKeyValPairs(decodedData: string[]): { [key: string]: string } {
+    const dict: { [key: string]: string } = {};
+    for (let j = 3; j < decodedData.length; j++) {
+      dict[decodedData[j]] = decodedData[j + 1];
+      j++;
+    }
+
+    return dict;
+  }
+
+  private checkStreamValidity(
+    streamID: string,
+    streamKey: string,
+    socket: net.Socket,
+    containsKeyValP: boolean
+  ): boolean {
+    const [ms, seqNum] = streamID.split("-");
+    const topStream = this.STORED_STREAMS[streamKey]?.slice().pop();
+
+    if (
+      Number.parseInt(ms) === 0 &&
+      Number.parseInt(seqNum) === 0 &&
+      containsKeyValP
+    ) {
+      socket.write(
+        redisProtocolEncoder.encodeSimpleError(
+          "ERR The ID specified in XADD must be greater than 0-0"
+        )
+      );
+      return false;
+    }
+
+    if (topStream && seqNum !== "*") {
+      if (topStream.streamIDMilliSecondsTime > Number.parseInt(ms)) {
+        socket.write(
+          redisProtocolEncoder.encodeSimpleError(
+            "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+          )
+        );
+        return false;
+      } else if (
+        topStream.streamIDMilliSecondsTime === Number.parseInt(ms) &&
+        topStream.sequenceNumber >= Number.parseInt(seqNum)
+      ) {
+        socket.write(
+          redisProtocolEncoder.encodeSimpleError(
+            "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+          )
+        );
+        return false;
+      } else if (
+        Number.parseInt(ms) > topStream.streamIDMilliSecondsTime &&
+        Number.parseInt(seqNum) < topStream.sequenceNumber
+      ) {
+        socket.write(
+          redisProtocolEncoder.encodeSimpleError(
+            "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+          )
+        );
+        return false;
+      }
+    } else if (topStream && seqNum === "*") {
+      if (topStream.streamIDMilliSecondsTime > Number.parseInt(ms)) {
+        socket.write(
+          redisProtocolEncoder.encodeSimpleError(
+            "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+          )
+        );
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private createStreamID(streamKey: string): string {
+    const topStream = this.STORED_STREAMS[streamKey]?.slice().pop();
+    const topSeqNum = topStream?.sequenceNumber;
+    const topMs = topStream?.sequenceNumber;
+
+    if (topSeqNum && topMs) {
+      if (Date.now() === topMs) {
+        return `${Date.now()}-${topSeqNum + 1}`;
+      } else if (Date.now() > topMs) {
+        return `${Date.now()}-${topSeqNum}`;
+      } else {
+        throw new Error("Error creating the streamID");
+      }
+    } else {
+      return `${Date.now()}-0`;
     }
   }
 }
