@@ -25,20 +25,12 @@ class RedisProtocolEncoder {
   }
 
   public encodeRespArr(arr: any[]): string {
-    let finalString = `*${arr.length}\r\n`;
-
-    finalString += this.encodeRespArrRecursively(arr);
-
-    return finalString;
-  }
-
-  public encodeRespArrRecursively(arr: any[]): string {
     let finalString = "";
+    finalString += `*${arr.length}\r\n`;
 
     for (let i = 0; i < arr.length; i++) {
       if (Array.isArray(arr[i])) {
-        finalString += `*${arr.length}\r\n`;
-        finalString += this.encodeRespArrRecursively(arr[i]);
+        finalString += this.encodeRespArr(arr[i]);
       } else if (typeof arr[i] === "string") {
         finalString += this.encodeBulkString(arr[i]);
       }

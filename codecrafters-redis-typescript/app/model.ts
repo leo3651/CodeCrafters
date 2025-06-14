@@ -22,8 +22,6 @@ export interface ISocketInfo {
   numberOfResponses: number;
 }
 
-export interface IStreamDict {
-  [key: string]: IStreamEntry[];
-}
+export type IStream = [string, IStreamEntry[]];
 
-type IStreamEntry = [string, string[]];
+export type IStreamEntry = [string, string[]];
