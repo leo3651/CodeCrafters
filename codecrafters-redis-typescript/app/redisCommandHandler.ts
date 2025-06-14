@@ -15,6 +15,7 @@ class RedisCommandHandler {
 
   private replicasSockets: ISocketInfo[] = [];
   private clientSockets: ISocketInfo[] = [];
+  private postponedCommands: string[][] = [];
 
   constructor() {}
 
@@ -337,6 +338,8 @@ class RedisCommandHandler {
             socket.write(redisProtocolEncoder.encodeSimpleString(streamID));
           }
 
+          this.postponedCommands.pop();
+
           break;
 
         case "xrange":
@@ -357,7 +360,9 @@ class RedisCommandHandler {
           break;
 
         case "xread":
-          const streams = decodedData[i].slice(2);
+          const streams = decodedData[i].slice(
+            decodedData[i].indexOf("streams") + 1
+          );
           const boundary = streams.length / 2;
           const streamsKeys = streams.slice(0, boundary);
           const streamsIDs = streams.slice(boundary, streams.length);
@@ -367,12 +372,35 @@ class RedisCommandHandler {
 
           const responseArr: IStream[] = [];
 
-          streamsKeys.forEach((sKey, i) => {
-            responseArr.push(streamHandler.readStream(sKey, streamsIDs[i]));
-          });
+          if (decodedData[i][1] === "block") {
+            const timeout = Number.parseInt(decodedData[i][2]);
 
-          console.log("READ RESPONSE: ", responseArr);
-          socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+            if (timeout === 0) {
+              this.postponedCommands.unshift(decodedData[i]);
+              await this.blockThread(streamsKeys[0], streamsIDs[0], socket);
+            } else {
+              setTimeout(() => {
+                responseArr.push(
+                  streamHandler.readStream(streamsKeys[0], streamsIDs[0])
+                );
+
+                const isNullStream = streamHandler.isNullStream(responseArr[0]);
+
+                if (isNullStream) {
+                  socket.write(redisProtocolEncoder.nullBulkString());
+                } else {
+                  socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+                }
+              }, timeout);
+            }
+          } else {
+            streamsKeys.forEach((sKey, i) => {
+              responseArr.push(streamHandler.readStream(sKey, streamsIDs[i]));
+            });
+
+            console.log("READ RESPONSE: ", responseArr);
+            socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+          }
 
           break;
 
@@ -432,6 +460,22 @@ class RedisCommandHandler {
     } else {
       return this.clientSockets.find((sockInfo) => sockInfo.socket === socket)!;
     }
+  }
+
+  private async blockThread(
+    streamKey: string,
+    streamID: string,
+    socket: net.Socket
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      setInterval(() => {
+        if (this.postponedCommands.length === 0) {
+          const responseArr = streamHandler.readStream(streamKey, streamID);
+          socket.write(redisProtocolEncoder.encodeRespArr([responseArr]));
+          resolve();
+        }
+      }, 300);
+    });
   }
 }
 

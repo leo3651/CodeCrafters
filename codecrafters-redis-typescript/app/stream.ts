@@ -32,6 +32,14 @@ class StreamHandler {
     return [streamKey, acceptableEntries];
   }
 
+  public isNullStream(stream: IStream): boolean {
+    if (!stream[1] || stream[1].length === 0) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   public addStream(streamKey: string, streamEntry: IStreamEntry): void {
     const stream = this.getStream(streamKey);
 
