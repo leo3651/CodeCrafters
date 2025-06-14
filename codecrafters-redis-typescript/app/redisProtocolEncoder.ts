@@ -23,6 +23,29 @@ class RedisProtocolEncoder {
 
     return output;
   }
+
+  public encodeRespArr(arr: any[]): string {
+    let finalString = `*${arr.length}\r\n`;
+
+    finalString += this.encodeRespArrRecursively(arr);
+
+    return finalString;
+  }
+
+  public encodeRespArrRecursively(arr: any[]): string {
+    let finalString = "";
+
+    for (let i = 0; i < arr.length; i++) {
+      if (Array.isArray(arr[i])) {
+        finalString += `*${arr.length}\r\n`;
+        finalString += this.encodeRespArrRecursively(arr[i]);
+      } else if (typeof arr[i] === "string") {
+        finalString += this.encodeBulkString(arr[i]);
+      }
+    }
+
+    return finalString;
+  }
 }
 
 const redisProtocolEncoder = new RedisProtocolEncoder();
