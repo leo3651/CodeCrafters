@@ -15,6 +15,10 @@ class RedisProtocolEncoder {
     return "$-1\r\n";
   }
 
+  public encodeNumber(data: string): string {
+    return `:${data}\r\n`;
+  }
+
   public encodeArrWithBulkStrings(strArr: string[]): string {
     let output = `*${strArr.length}\r\n`;
     for (let i = 0; i < strArr.length; i++) {

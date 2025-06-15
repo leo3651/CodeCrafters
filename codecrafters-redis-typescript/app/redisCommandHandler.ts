@@ -127,6 +127,34 @@ class RedisCommandHandler {
 
           break;
 
+        case "incr":
+          {
+            const key = decodedData[i][1];
+            let value = this.STORED_KEY_VAL_PAIRS[key];
+
+            if (value) {
+              let numberValue = +value;
+              if (Number.isNaN(numberValue)) {
+                socket.write(
+                  redisProtocolEncoder.encodeSimpleError(
+                    "ERR value is not an integer or out of range"
+                  )
+                );
+                return;
+              } else {
+                numberValue++;
+                this.STORED_KEY_VAL_PAIRS[key] = numberValue.toString();
+              }
+            } else {
+              this.STORED_KEY_VAL_PAIRS[key] = "1";
+            }
+
+            socket.write(
+              redisProtocolEncoder.encodeNumber(this.STORED_KEY_VAL_PAIRS[key])
+            );
+          }
+          break;
+
         case "config":
           if (decodedData[i][1]?.toLowerCase() === "get") {
             if (decodedData[i][2] === "dir") {
