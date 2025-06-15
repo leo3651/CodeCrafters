@@ -3,6 +3,7 @@ import { redisProtocolEncoder } from "./redisProtocolEncoder";
 
 class StreamHandler {
   STORED_STREAMS: IStream[] = [];
+  public newEntry = false;
 
   constructor() {}
 
@@ -20,14 +21,22 @@ class StreamHandler {
 
     const acceptableEntries: IStreamEntry[] = [];
 
-    stream[1].forEach(([sID, sEntry]) => {
-      if (
-        Number.parseInt(sID.replace("-", "")) >
-        Number.parseInt(streamID.replace("-", ""))
-      ) {
-        acceptableEntries.push([sID, sEntry]);
+    if (streamID !== "$") {
+      stream[1].forEach(([sID, sEntry]) => {
+        if (
+          Number.parseInt(sID.replace("-", "")) >
+          Number.parseInt(streamID.replace("-", ""))
+        ) {
+          acceptableEntries.push([sID, sEntry]);
+        }
+      });
+    } else if (this.newEntry && streamID === "$") {
+      this.newEntry = false;
+      const topStreamEntry = stream[1].pop();
+      if (topStreamEntry) {
+        acceptableEntries.push(topStreamEntry);
       }
-    });
+    }
 
     return [streamKey, acceptableEntries];
   }

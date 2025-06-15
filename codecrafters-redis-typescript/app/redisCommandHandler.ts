@@ -339,6 +339,7 @@ class RedisCommandHandler {
           }
 
           this.postponedCommands.pop();
+          streamHandler.newEntry = true;
 
           break;
 
@@ -370,8 +371,6 @@ class RedisCommandHandler {
           console.log(streamsKeys);
           console.log(streamsIDs);
 
-          const responseArr: IStream[] = [];
-
           if (decodedData[i][1] === "block") {
             const timeout = Number.parseInt(decodedData[i][2]);
 
@@ -379,21 +378,16 @@ class RedisCommandHandler {
               this.postponedCommands.unshift(decodedData[i]);
               await this.blockThread(streamsKeys[0], streamsIDs[0], socket);
             } else {
-              setTimeout(() => {
-                responseArr.push(
-                  streamHandler.readStream(streamsKeys[0], streamsIDs[0])
-                );
-
-                const isNullStream = streamHandler.isNullStream(responseArr[0]);
-
-                if (isNullStream) {
-                  socket.write(redisProtocolEncoder.nullBulkString());
-                } else {
-                  socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
-                }
-              }, timeout);
+              this.delayResponse(
+                streamsKeys[0],
+                streamsIDs[0],
+                socket,
+                timeout
+              );
             }
           } else {
+            const responseArr: IStream[] = [];
+
             streamsKeys.forEach((sKey, i) => {
               responseArr.push(streamHandler.readStream(sKey, streamsIDs[i]));
             });
@@ -471,11 +465,40 @@ class RedisCommandHandler {
       setInterval(() => {
         if (this.postponedCommands.length === 0) {
           const responseArr = streamHandler.readStream(streamKey, streamID);
-          socket.write(redisProtocolEncoder.encodeRespArr([responseArr]));
+
+          const isNullStream = streamHandler.isNullStream(responseArr);
+
+          if (isNullStream) {
+            socket.write(redisProtocolEncoder.nullBulkString());
+          } else {
+            socket.write(redisProtocolEncoder.encodeRespArr([responseArr]));
+          }
+
           resolve();
         }
       }, 300);
     });
+  }
+
+  private delayResponse(
+    streamKey: string,
+    streamID: string,
+    socket: net.Socket,
+    timeout: number
+  ) {
+    setTimeout(() => {
+      const responseArr = [];
+      responseArr.push(streamHandler.readStream(streamKey, streamID));
+
+      const isNullStream = streamHandler.isNullStream(responseArr[0]);
+
+      console.log("READ RESPONSE: ", responseArr);
+      if (isNullStream) {
+        socket.write(redisProtocolEncoder.nullBulkString());
+      } else {
+        socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+      }
+    }, timeout);
   }
 }
 
