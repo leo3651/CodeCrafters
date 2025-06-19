@@ -482,8 +482,8 @@ class RedisCommandHandler {
             redisProtocolEncoder.encodeSimpleString("OK")
           );
 
-          const socketInfo = this.getSocketInfo(socket);
-          socketInfo.isMulti = true;
+          this.getSocketInfo(socket).isMulti = true;
+
           break;
         }
 
@@ -514,6 +514,27 @@ class RedisCommandHandler {
             );
           }
           break;
+
+        case "discard": {
+          const socketInfo = this.getSocketInfo(socket);
+
+          if (socketInfo.isMulti) {
+            socketInfo.queuedCommands = [];
+            socketInfo.isMulti = false;
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleString("OK")
+            );
+          } else {
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleError(
+                "ERR DISCARD without MULTI"
+              )
+            );
+          }
+          break;
+        }
 
         default:
           if (
@@ -649,7 +670,11 @@ class RedisCommandHandler {
     socket: net.Socket,
     decodedData: string[]
   ): boolean {
-    if (this.getSocketInfo(socket).isMulti && decodedData[0] !== "EXEC") {
+    if (
+      this.getSocketInfo(socket).isMulti &&
+      decodedData[0] !== "EXEC" &&
+      decodedData[0] !== "DISCARD"
+    ) {
       this.getSocketInfo(socket).queuedCommands.push(decodedData);
       this.handleResponse(
         socket,
