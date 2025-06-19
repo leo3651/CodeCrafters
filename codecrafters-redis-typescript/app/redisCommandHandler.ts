@@ -13,7 +13,6 @@ class RedisCommandHandler {
 
   public STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
 
-  private replicasSockets: ISocketInfo[] = [];
   private clientSockets: ISocketInfo[] = [];
   private postponedCommands: string[][] = [];
 
@@ -33,6 +32,7 @@ class RedisCommandHandler {
       isMulti: false,
       queuedCommands: [],
       queuedReplies: [],
+      isReplica: false,
     });
 
     for (let i = 0; i < decodedData.length; i++) {
@@ -62,7 +62,7 @@ class RedisCommandHandler {
           break;
 
         case "ok":
-          const socketInfo = this.getSocketInfo(masterReplies, socket);
+          const socketInfo = this.getSocketInfo(socket);
 
           socketInfo.numberOfResponses++;
           if (socketInfo.numberOfResponses === 2) {
@@ -232,7 +232,7 @@ class RedisCommandHandler {
 
         case "replconf":
           if (decodedData[i][1] === "ACK") {
-            const socketInfo = this.getSocketInfo(masterReplies, socket);
+            const socketInfo = this.getSocketInfo(socket);
 
             socketInfo.processedBytes = Number.parseInt(decodedData[i][2]);
             socketInfo.propagatedBytes +=
@@ -242,7 +242,7 @@ class RedisCommandHandler {
                 "*",
               ]).length;
           } else if (decodedData[i][1] === "GETACK") {
-            const socketInfo = this.getSocketInfo(masterReplies, socket);
+            const socketInfo = this.getSocketInfo(socket);
 
             this.handleResponse(
               socket,
@@ -278,16 +278,7 @@ class RedisCommandHandler {
           ]);
           this.handleResponse(socket, finalBuf);
 
-          this.replicasSockets.push({
-            socket,
-            processedBytes: 0,
-            propagatedBytes: 0,
-            numberOfResponses: 0,
-            isMulti: false,
-            queuedCommands: [],
-            queuedReplies: [],
-          });
-          this.removeReplicaFromClientSocketsArr(socket);
+          this.getSocketInfo(socket).isReplica = true;
 
           break;
 
@@ -297,23 +288,28 @@ class RedisCommandHandler {
             const expireTime = Number.parseInt(decodedData[i][2]);
 
             const askForACKInterval = setInterval(() => {
-              this.replicasSockets.forEach((socketInfo) => {
-                const respEncodedCommand =
-                  redisProtocolEncoder.encodeArrWithBulkStrings([
-                    "REPLCONF",
-                    "GETACK",
-                    "*",
-                  ]);
-                this.handleResponse(socketInfo.socket, respEncodedCommand);
-              });
+              this.clientSockets
+                .filter((sockInfo) => sockInfo.isReplica)
+                .forEach((socketInfo) => {
+                  const respEncodedCommand =
+                    redisProtocolEncoder.encodeArrWithBulkStrings([
+                      "REPLCONF",
+                      "GETACK",
+                      "*",
+                    ]);
+                  this.handleResponse(socketInfo.socket, respEncodedCommand);
+                });
             }, 20);
 
             const checkIfWaitResolvedInterval = setInterval(() => {
-              const numOfAckReplicas = this.replicasSockets.filter(
-                (socketInfo) =>
-                  socketInfo.propagatedBytes === socketInfo.processedBytes ||
-                  socketInfo.processedBytes + 37 === socketInfo.propagatedBytes
-              ).length;
+              const numOfAckReplicas = this.clientSockets
+                .filter((sockInfo) => sockInfo.isReplica)
+                .filter(
+                  (socketInfo) =>
+                    socketInfo.propagatedBytes === socketInfo.processedBytes ||
+                    socketInfo.processedBytes + 37 ===
+                      socketInfo.propagatedBytes
+                ).length;
               if (numOfAckReplicas >= numOfAckReplicasNeeded) {
                 clearInterval(checkIfWaitResolvedInterval);
                 clearInterval(askForACKInterval);
@@ -329,16 +325,21 @@ class RedisCommandHandler {
               clearInterval(askForACKInterval);
               clearTimeout(resolveTimeout);
 
-              const numOfAckReplicas = this.replicasSockets.filter(
-                (socketInfo) =>
-                  socketInfo.propagatedBytes === socketInfo.processedBytes ||
-                  socketInfo.processedBytes + 37 === socketInfo.propagatedBytes
-              ).length;
-              this.replicasSockets.forEach((socketInfo) => {
-                console.log(
-                  `${socketInfo.propagatedBytes}/${socketInfo.processedBytes}`
-                );
-              });
+              const numOfAckReplicas = this.clientSockets
+                .filter((sockInfo) => sockInfo.isReplica)
+                .filter(
+                  (socketInfo) =>
+                    socketInfo.propagatedBytes === socketInfo.processedBytes ||
+                    socketInfo.processedBytes + 37 ===
+                      socketInfo.propagatedBytes
+                ).length;
+              this.clientSockets
+                .filter((sockInfo) => sockInfo.isReplica)
+                .forEach((socketInfo) => {
+                  console.log(
+                    `${socketInfo.propagatedBytes}/${socketInfo.processedBytes}`
+                  );
+                });
 
               resolve(this.handleResponse(socket, `:${numOfAckReplicas}\r\n`));
             }, expireTime);
@@ -485,13 +486,13 @@ class RedisCommandHandler {
             redisProtocolEncoder.encodeSimpleString("OK")
           );
 
-          const socketInfo = this.getSocketInfo(masterReplies, socket);
+          const socketInfo = this.getSocketInfo(socket);
           socketInfo.isMulti = true;
           break;
         }
 
         case "exec":
-          if (!this.getSocketInfo(masterReplies, socket).isMulti) {
+          if (!this.getSocketInfo(socket).isMulti) {
             this.handleResponse(
               socket,
               redisProtocolEncoder.encodeSimpleError("ERR EXEC without MULTI")
@@ -500,7 +501,7 @@ class RedisCommandHandler {
             this.handleResponse(
               socket,
               redisProtocolEncoder.encodeRespArr(
-                this.getSocketInfo(masterReplies, socket).queuedCommands
+                this.getSocketInfo(socket).queuedCommands
               )
             );
           }
@@ -517,7 +518,7 @@ class RedisCommandHandler {
       }
 
       if (!masterReplies && propagatedCommand) {
-        const socketInfo = this.getSocketInfo(masterReplies, socket);
+        const socketInfo = this.getSocketInfo(socket);
 
         socketInfo.processedBytes +=
           redisProtocolEncoder.encodeArrWithBulkStrings(decodedData[i]).length;
@@ -526,14 +527,16 @@ class RedisCommandHandler {
   }
 
   private propagateCommand(decodedData: string[]): void {
-    this.replicasSockets.forEach((sockInfo) => {
-      const respEncodedCommand =
-        redisProtocolEncoder.encodeArrWithBulkStrings(decodedData);
+    this.clientSockets
+      .filter((sockInfo) => sockInfo.isReplica)
+      .forEach((sockInfo) => {
+        const respEncodedCommand =
+          redisProtocolEncoder.encodeArrWithBulkStrings(decodedData);
 
-      this.handleResponse(sockInfo.socket, respEncodedCommand);
-      sockInfo.propagatedBytes += respEncodedCommand.length;
-      console.log(`${sockInfo.propagatedBytes}/${sockInfo.processedBytes}`);
-    });
+        this.handleResponse(sockInfo.socket, respEncodedCommand);
+        sockInfo.propagatedBytes += respEncodedCommand.length;
+        console.log(`${sockInfo.propagatedBytes}/${sockInfo.processedBytes}`);
+      });
   }
 
   private createStringFromInfo(): string {
@@ -544,25 +547,16 @@ class RedisCommandHandler {
     return result;
   }
 
-  private removeReplicaFromClientSocketsArr(socket: net.Socket): void {
-    const deletionIndex = this.clientSockets.findIndex(
+  private getSocketInfo(socket: net.Socket): ISocketInfo {
+    const socketInfo = this.clientSockets.find(
       (socketInfo) => socketInfo.socket === socket
     );
 
-    this.clientSockets.splice(deletionIndex, 1);
-  }
-
-  private getSocketInfo(
-    masterReplies: boolean,
-    socket: net.Socket
-  ): ISocketInfo {
-    if (masterReplies) {
-      return this.replicasSockets.find(
-        (sockInfo) => sockInfo.socket === socket
-      )!;
-    } else {
-      return this.clientSockets.find((sockInfo) => sockInfo.socket === socket)!;
+    if (!socketInfo) {
+      throw new Error("Socket does not exists");
     }
+
+    return socketInfo;
   }
 
   private async blockThread(

@@ -23,6 +23,7 @@ export interface ISocketInfo {
   isMulti: boolean;
   queuedCommands: string[][];
   queuedReplies: string[];
+  isReplica: boolean;
 }
 
 export type IStream = [string, IStreamEntry[]];
