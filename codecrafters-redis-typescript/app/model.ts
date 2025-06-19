@@ -22,9 +22,12 @@ export interface ISocketInfo {
   numberOfResponses: number;
   isMulti: boolean;
   queuedCommands: string[][];
-  queuedReplies: string[];
+  queuedReplies: Reply[];
   isReplica: boolean;
+  isExec: boolean;
 }
+
+export type Reply = Buffer | string;
 
 export type IStream = [string, IStreamEntry[]];
 

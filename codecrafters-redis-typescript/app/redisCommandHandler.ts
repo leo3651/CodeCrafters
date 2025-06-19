@@ -24,18 +24,14 @@ class RedisCommandHandler {
     masterReplies: boolean,
     port: number
   ): Promise<void> {
-    this.clientSockets.push({
-      socket,
-      processedBytes: 0,
-      numberOfResponses: 0,
-      propagatedBytes: 0,
-      isMulti: false,
-      queuedCommands: [],
-      queuedReplies: [],
-      isReplica: false,
-    });
+    this.addSocketIfNeeded(socket);
 
     for (let i = 0; i < decodedData.length; i++) {
+      const isMultiCommand = this.handleMultiCommand(socket, decodedData[i]);
+      if (isMultiCommand) {
+        return;
+      }
+
       let propagatedCommand = false;
 
       switch (decodedData[i][0].toLowerCase()) {
@@ -498,10 +494,22 @@ class RedisCommandHandler {
               redisProtocolEncoder.encodeSimpleError("ERR EXEC without MULTI")
             );
           } else {
+            this.getSocketInfo(socket).isMulti = false;
+            this.getSocketInfo(socket).isExec = true;
+
+            this.handleRedisCommand(
+              this.getSocketInfo(socket).queuedCommands,
+              socket,
+              masterReplies,
+              port
+            );
+
+            this.getSocketInfo(socket).isExec = false;
+
             this.handleResponse(
               socket,
               redisProtocolEncoder.encodeRespArr(
-                this.getSocketInfo(socket).queuedCommands
+                this.getSocketInfo(socket).queuedReplies
               )
             );
           }
@@ -545,6 +553,25 @@ class RedisCommandHandler {
       (key) => (result += `${key}:${(this.info as any)[key]}`)
     );
     return result;
+  }
+
+  private addSocketIfNeeded(socket: net.Socket): void {
+    const socketInfo = this.clientSockets.find(
+      (socketInfo) => socketInfo.socket === socket
+    );
+    if (!socketInfo) {
+      this.clientSockets.push({
+        socket,
+        processedBytes: 0,
+        numberOfResponses: 0,
+        propagatedBytes: 0,
+        isMulti: false,
+        queuedCommands: [],
+        queuedReplies: [],
+        isReplica: false,
+        isExec: false,
+      });
+    }
   }
 
   private getSocketInfo(socket: net.Socket): ISocketInfo {
@@ -591,7 +618,7 @@ class RedisCommandHandler {
     streamID: string,
     socket: net.Socket,
     timeout: number
-  ) {
+  ): void {
     setTimeout(() => {
       const responseArr = [];
       responseArr.push(streamHandler.readStream(streamKey, streamID));
@@ -611,7 +638,27 @@ class RedisCommandHandler {
   }
 
   private handleResponse(socket: net.Socket, message: string | Buffer): void {
-    socket.write(message);
+    if (this.getSocketInfo(socket).isExec) {
+      this.getSocketInfo(socket).queuedReplies.push(message);
+    } else {
+      socket.write(message);
+    }
+  }
+
+  private handleMultiCommand(
+    socket: net.Socket,
+    decodedData: string[]
+  ): boolean {
+    if (this.getSocketInfo(socket).isMulti && decodedData[0] !== "EXEC") {
+      this.getSocketInfo(socket).queuedCommands.push(decodedData);
+      this.handleResponse(
+        socket,
+        redisProtocolEncoder.encodeSimpleString("QUEUED")
+      );
+      return true;
+    } else {
+      return false;
+    }
   }
 }
 
