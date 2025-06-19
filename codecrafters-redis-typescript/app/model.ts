@@ -20,6 +20,9 @@ export interface ISocketInfo {
   propagatedBytes: number;
   processedBytes: number;
   numberOfResponses: number;
+  isMulti: boolean;
+  queuedCommands: string[][];
+  queuedReplies: string[];
 }
 
 export type IStream = [string, IStreamEntry[]];

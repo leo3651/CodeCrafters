@@ -30,6 +30,9 @@ class RedisCommandHandler {
       processedBytes: 0,
       numberOfResponses: 0,
       propagatedBytes: 0,
+      isMulti: false,
+      queuedCommands: [],
+      queuedReplies: [],
     });
 
     for (let i = 0; i < decodedData.length; i++) {
@@ -38,13 +41,19 @@ class RedisCommandHandler {
       switch (decodedData[i][0].toLowerCase()) {
         case "echo":
           const arg = decodedData[i][1];
-          socket.write(redisProtocolEncoder.encodeBulkString(arg));
+          this.handleResponse(
+            socket,
+            redisProtocolEncoder.encodeBulkString(arg)
+          );
 
           break;
 
         case "ping":
           if (masterReplies) {
-            socket.write(redisProtocolEncoder.encodeBulkString("PONG"));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeBulkString("PONG")
+            );
           }
           if (!masterReplies) {
             propagatedCommand = true;
@@ -57,7 +66,8 @@ class RedisCommandHandler {
 
           socketInfo.numberOfResponses++;
           if (socketInfo.numberOfResponses === 2) {
-            socket.write(
+            this.handleResponse(
+              socket,
               redisProtocolEncoder.encodeArrWithBulkStrings([
                 "PSYNC",
                 "?",
@@ -69,20 +79,23 @@ class RedisCommandHandler {
           break;
 
         case "pong":
-          socket.write(
+          this.handleResponse(
+            socket,
             redisProtocolEncoder.encodeArrWithBulkStrings([
               "REPLCONF",
               "listening-port",
               `${port}`,
             ])
           );
-          socket.write(
+          this.handleResponse(
+            socket,
             redisProtocolEncoder.encodeArrWithBulkStrings([
               "REPLCONF",
               "capa",
               "psync2",
             ])
           );
+
           break;
 
         case "set":
@@ -100,7 +113,10 @@ class RedisCommandHandler {
               }, expiryTime);
             }
 
-            socket.write(redisProtocolEncoder.encodeSimpleString("OK"));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleString("OK")
+            );
 
             this.propagateCommand(decodedData[i]);
           } else {
@@ -120,9 +136,12 @@ class RedisCommandHandler {
               rdbFileParser.KEY_VAL_WITHOUT_EXPIRY[decodedData[i][1]] ||
               rdbFileParser.KEY_VAL_WITH_EXPIRY[decodedData[i][1]];
 
-            socket.write(redisProtocolEncoder.encodeBulkString(value));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeBulkString(value)
+            );
           } else {
-            socket.write(redisProtocolEncoder.nullBulkString());
+            this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
           }
 
           break;
@@ -135,7 +154,8 @@ class RedisCommandHandler {
             if (value) {
               let numberValue = +value;
               if (Number.isNaN(numberValue)) {
-                socket.write(
+                this.handleResponse(
+                  socket,
                   redisProtocolEncoder.encodeSimpleError(
                     "ERR value is not an integer or out of range"
                   )
@@ -149,7 +169,8 @@ class RedisCommandHandler {
               this.STORED_KEY_VAL_PAIRS[key] = "1";
             }
 
-            socket.write(
+            this.handleResponse(
+              socket,
               redisProtocolEncoder.encodeNumber(this.STORED_KEY_VAL_PAIRS[key])
             );
           }
@@ -158,14 +179,16 @@ class RedisCommandHandler {
         case "config":
           if (decodedData[i][1]?.toLowerCase() === "get") {
             if (decodedData[i][2] === "dir") {
-              socket.write(
+              this.handleResponse(
+                socket,
                 redisProtocolEncoder.encodeArrWithBulkStrings([
                   "dir",
                   rdbFileParser.dir,
                 ])
               );
             } else if (decodedData[i][2] === "dbfilename") {
-              socket.write(
+              this.handleResponse(
+                socket,
                 redisProtocolEncoder.encodeArrWithBulkStrings([
                   "dbfilename",
                   rdbFileParser.dbFileName,
@@ -182,7 +205,8 @@ class RedisCommandHandler {
 
         case "keys":
           if (decodedData[i][1] === "*") {
-            socket.write(
+            this.handleResponse(
+              socket,
               redisProtocolEncoder.encodeArrWithBulkStrings([
                 ...Object.keys(rdbFileParser.KEY_VAL_WITHOUT_EXPIRY),
                 ...Object.keys(rdbFileParser.KEY_VAL_WITH_EXPIRY),
@@ -196,7 +220,8 @@ class RedisCommandHandler {
 
         case "info":
           if (decodedData[i][1] === "replication") {
-            socket.write(
+            this.handleResponse(
+              socket,
               redisProtocolEncoder.encodeBulkString(this.createStringFromInfo())
             );
           } else {
@@ -219,7 +244,8 @@ class RedisCommandHandler {
           } else if (decodedData[i][1] === "GETACK") {
             const socketInfo = this.getSocketInfo(masterReplies, socket);
 
-            socket.write(
+            this.handleResponse(
+              socket,
               redisProtocolEncoder.encodeArrWithBulkStrings([
                 "REPLCONF",
                 "ACK",
@@ -228,13 +254,17 @@ class RedisCommandHandler {
             );
             propagatedCommand = true;
           } else {
-            socket.write(redisProtocolEncoder.encodeSimpleString("OK"));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleString("OK")
+            );
           }
 
           break;
 
         case "psync":
-          socket.write(
+          this.handleResponse(
+            socket,
             redisProtocolEncoder.encodeSimpleString(
               `FULLRESYNC ${this.info.master_replid} ${this.info.master_repl_offset}`
             )
@@ -246,13 +276,16 @@ class RedisCommandHandler {
             Buffer.from(`$${buf.length}\r\n`),
             buf,
           ]);
-          socket.write(finalBuf);
+          this.handleResponse(socket, finalBuf);
 
           this.replicasSockets.push({
             socket,
             processedBytes: 0,
             propagatedBytes: 0,
             numberOfResponses: 0,
+            isMulti: false,
+            queuedCommands: [],
+            queuedReplies: [],
           });
           this.removeReplicaFromClientSocketsArr(socket);
 
@@ -271,7 +304,7 @@ class RedisCommandHandler {
                     "GETACK",
                     "*",
                   ]);
-                socketInfo.socket.write(respEncodedCommand);
+                this.handleResponse(socketInfo.socket, respEncodedCommand);
               });
             }, 20);
 
@@ -285,8 +318,9 @@ class RedisCommandHandler {
                 clearInterval(checkIfWaitResolvedInterval);
                 clearInterval(askForACKInterval);
                 clearTimeout(resolveTimeout);
-
-                resolve(socket.write(`:${numOfAckReplicas}\r\n`));
+                resolve(
+                  this.handleResponse(socket, `:${numOfAckReplicas}\r\n`)
+                );
               }
             }, 10);
 
@@ -306,7 +340,7 @@ class RedisCommandHandler {
                 );
               });
 
-              resolve(socket.write(`:${numOfAckReplicas}\r\n`));
+              resolve(this.handleResponse(socket, `:${numOfAckReplicas}\r\n`));
             }, expireTime);
           });
 
@@ -319,13 +353,20 @@ class RedisCommandHandler {
             const stream = streamHandler.getStream(key);
 
             if (value) {
-              socket.write(
+              this.handleResponse(
+                socket,
                 redisProtocolEncoder.encodeSimpleString(typeof value)
               );
             } else if (stream) {
-              socket.write(redisProtocolEncoder.encodeSimpleString("stream"));
+              this.handleResponse(
+                socket,
+                redisProtocolEncoder.encodeSimpleString("stream")
+              );
             } else {
-              socket.write(redisProtocolEncoder.encodeSimpleString("none"));
+              this.handleResponse(
+                socket,
+                redisProtocolEncoder.encodeSimpleString("none")
+              );
             }
           }
           break;
@@ -347,7 +388,7 @@ class RedisCommandHandler {
             !!decodedData[i][3]
           );
           if (error) {
-            socket.write(error);
+            this.handleResponse(socket, error);
             break;
           }
 
@@ -361,9 +402,15 @@ class RedisCommandHandler {
           ]);
 
           if (isAutoGenerated) {
-            socket.write(redisProtocolEncoder.encodeBulkString(streamID));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeBulkString(streamID)
+            );
           } else {
-            socket.write(redisProtocolEncoder.encodeSimpleString(streamID));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleString(streamID)
+            );
           }
 
           this.postponedCommands.pop();
@@ -383,7 +430,10 @@ class RedisCommandHandler {
               streamIDEnd
             );
 
-            socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeRespArr(responseArr)
+            );
           }
 
           break;
@@ -421,9 +471,39 @@ class RedisCommandHandler {
             });
 
             console.log("READ RESPONSE: ", responseArr);
-            socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeRespArr(responseArr)
+            );
           }
 
+          break;
+
+        case "multi": {
+          this.handleResponse(
+            socket,
+            redisProtocolEncoder.encodeSimpleString("OK")
+          );
+
+          const socketInfo = this.getSocketInfo(masterReplies, socket);
+          socketInfo.isMulti = true;
+          break;
+        }
+
+        case "exec":
+          if (!this.getSocketInfo(masterReplies, socket).isMulti) {
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeSimpleError("ERR EXEC without MULTI")
+            );
+          } else {
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeRespArr(
+                this.getSocketInfo(masterReplies, socket).queuedCommands
+              )
+            );
+          }
           break;
 
         default:
@@ -449,7 +529,8 @@ class RedisCommandHandler {
     this.replicasSockets.forEach((sockInfo) => {
       const respEncodedCommand =
         redisProtocolEncoder.encodeArrWithBulkStrings(decodedData);
-      sockInfo.socket.write(respEncodedCommand);
+
+      this.handleResponse(sockInfo.socket, respEncodedCommand);
       sockInfo.propagatedBytes += respEncodedCommand.length;
       console.log(`${sockInfo.propagatedBytes}/${sockInfo.processedBytes}`);
     });
@@ -497,9 +578,12 @@ class RedisCommandHandler {
           const isNullStream = streamHandler.isNullStream(responseArr);
 
           if (isNullStream) {
-            socket.write(redisProtocolEncoder.nullBulkString());
+            this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
           } else {
-            socket.write(redisProtocolEncoder.encodeRespArr([responseArr]));
+            this.handleResponse(
+              socket,
+              redisProtocolEncoder.encodeRespArr([responseArr])
+            );
           }
 
           resolve();
@@ -522,11 +606,18 @@ class RedisCommandHandler {
 
       console.log("READ RESPONSE: ", responseArr);
       if (isNullStream) {
-        socket.write(redisProtocolEncoder.nullBulkString());
+        this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
       } else {
-        socket.write(redisProtocolEncoder.encodeRespArr(responseArr));
+        this.handleResponse(
+          socket,
+          redisProtocolEncoder.encodeRespArr(responseArr)
+        );
       }
     }, timeout);
+  }
+
+  private handleResponse(socket: net.Socket, message: string | Buffer): void {
+    socket.write(message);
   }
 }
 
