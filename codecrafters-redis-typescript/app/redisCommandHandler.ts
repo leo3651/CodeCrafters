@@ -25,11 +25,10 @@ class RedisCommandHandler {
     port: number
   ): Promise<void> {
     this.addSocketIfNeeded(socket);
-
     for (let i = 0; i < decodedData.length; i++) {
       const isMultiCommand = this.handleMultiCommand(socket, decodedData[i]);
       if (isMultiCommand) {
-        return;
+        continue;
       }
 
       let propagatedCommand = false;
@@ -156,7 +155,7 @@ class RedisCommandHandler {
                     "ERR value is not an integer or out of range"
                   )
                 );
-                return;
+                break;
               } else {
                 numberValue++;
                 this.STORED_KEY_VAL_PAIRS[key] = numberValue.toString();
@@ -497,7 +496,7 @@ class RedisCommandHandler {
             this.getSocketInfo(socket).isMulti = false;
             this.getSocketInfo(socket).isExec = true;
 
-            this.handleRedisCommand(
+            await this.handleRedisCommand(
               this.getSocketInfo(socket).queuedCommands,
               socket,
               masterReplies,
