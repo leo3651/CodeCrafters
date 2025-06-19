@@ -508,9 +508,9 @@ class RedisCommandHandler {
 
             this.handleResponse(
               socket,
-              redisProtocolEncoder.encodeRespArr(
-                this.getSocketInfo(socket).queuedReplies
-              )
+              `*${
+                this.getSocketInfo(socket).queuedReplies.length
+              }\r\n${this.getSocketInfo(socket).queuedReplies.join("")}`
             );
           }
           break;
