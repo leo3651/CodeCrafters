@@ -9,12 +9,13 @@ const server: net.Server = net.createServer((socket: net.Socket) => {
     console.log(data);
     console.log(`BUFFER TO STRING: ${data.toString()}`);
 
-    const header = kafkaHandler.parseKafkaHeader(data);
-    const responseBuffer = Buffer.alloc(8);
-    responseBuffer.writeInt32BE(0, 0);
-    responseBuffer.writeInt32BE(header.correlationID, 4);
+    const reqHeader = kafkaHandler.parseKafkaHeader(data);
+    console.log(reqHeader);
 
-    socket.write(responseBuffer);
+    const resBuffer = kafkaHandler.createResponseHeader(reqHeader);
+    console.log(resBuffer);
+
+    socket.write(resBuffer);
   });
 });
 
