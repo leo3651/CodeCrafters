@@ -11,3 +11,9 @@ export interface IKafkaRequestHeader extends IKafkaHeader {
 export interface IKafkaResponseHeader extends IKafkaHeader {
   errorCode: number;
 }
+
+export interface IApiVersion {
+  apiKey: number;
+  maxVersion: number;
+  minVersion: number;
+}
