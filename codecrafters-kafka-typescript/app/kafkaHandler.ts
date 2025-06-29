@@ -44,6 +44,7 @@ class KafkaHandler {
     const errorCodeBuffer = this.buildErrorCodeBuffer(errorCode);
     const apiVersionBuffer = this.buildApiVersionsArrayBuffer([
       { apiKey: reqHeader.reqApiKey, maxVersion: 4, minVersion: 0 },
+      { apiKey: 75, maxVersion: 0, minVersion: 0 },
     ]);
     const throttleTimeBuffer = this.buildThrottleTimeBuffer(0);
     const tagBuffer = this.buildTagBuffer();
