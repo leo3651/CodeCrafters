@@ -1,4 +1,9 @@
-import type { IApiVersion, IKafkaRequestHeader } from "./model";
+import type {
+  IApiVersion,
+  IKafkaRequestHeader,
+  IKafkaRequestHeaderDescribePartitions,
+  ITopic,
+} from "./model";
 
 class KafkaHandler {
   private SUPPORTED_API_VERSIONS: number[] = [0, 1, 2, 3, 4];
@@ -15,50 +20,146 @@ class KafkaHandler {
 
   constructor() {}
 
-  public parseKafkaHeader(data: Buffer): IKafkaRequestHeader {
+  public createResponse(data: Buffer): Buffer {
+    let responseBody: Buffer = Buffer.alloc(0);
+
     const messageSize = data.readInt32BE();
     const reqApiKey = data.readInt16BE(4);
     const reqApiVersion = data.readInt16BE(6);
     const correlationID = data.readInt32BE(8);
+    const clientIDLen = data.readInt16BE(12);
+    const clientID = data.slice(14, 14 + clientIDLen);
 
-    const kafkaHeader: IKafkaRequestHeader = {
+    // 14 - start of clientID + clientIDLength + tagBuffer
+    const relevantDataOffset = 14 + clientIDLen + 1;
+    const header: IKafkaRequestHeader = {
+      messageSize,
       reqApiKey,
       reqApiVersion,
       correlationID,
-      messageSize,
+      clientIDLen,
+      clientID,
     };
 
-    return kafkaHeader;
+    // Describe partitions
+    if (reqApiKey === 75) {
+      const describePartitionsReqHeader = this.parseDescribePartitionsHeader(
+        data,
+        relevantDataOffset
+      );
+
+      responseBody = this.createDescribePartitionsResHeaderBody({
+        ...header,
+        ...describePartitionsReqHeader,
+      });
+    }
+
+    // Request api versions
+    else if (reqApiKey === 18) {
+      responseBody = this.createV4ResponseHeaderBody(header);
+    }
+
+    const mesLenBuffer = this.buildMessageSizeBuffer(responseBody.length);
+
+    return Buffer.concat([mesLenBuffer, responseBody]);
   }
 
-  public createResponseHeader(reqHeader: IKafkaRequestHeader): Buffer {
+  public createV4ResponseHeaderBody(header: IKafkaRequestHeader): Buffer {
     let errorCode = 0;
 
-    if (!this.SUPPORTED_API_VERSIONS.includes(reqHeader.reqApiVersion)) {
+    if (!this.SUPPORTED_API_VERSIONS.includes(header.reqApiVersion)) {
       errorCode = 35;
     }
 
     const correlationIDBuffer = this.buildCorrelationIDBuffer(
-      reqHeader.correlationID
+      header.correlationID
     );
+
     const errorCodeBuffer = this.buildErrorCodeBuffer(errorCode);
     const apiVersionBuffer = this.buildApiVersionsArrayBuffer([
-      { apiKey: reqHeader.reqApiKey, maxVersion: 4, minVersion: 0 },
+      { apiKey: header.reqApiKey, maxVersion: 4, minVersion: 0 },
       { apiKey: 75, maxVersion: 0, minVersion: 0 },
     ]);
     const throttleTimeBuffer = this.buildThrottleTimeBuffer(0);
-    const tagBuffer = this.buildTagBuffer();
+    const tagBuffer = this.buildTagBuffer(0);
 
-    const bodyBuffer = Buffer.concat([
+    return Buffer.concat([
       correlationIDBuffer,
       errorCodeBuffer,
       apiVersionBuffer,
       throttleTimeBuffer,
       tagBuffer,
     ]);
-    const messLengthBuffer = this.buildMessageSizeBuffer(bodyBuffer.length);
+  }
 
-    return Buffer.concat([messLengthBuffer, bodyBuffer]);
+  private createDescribePartitionsResHeaderBody(
+    header: IKafkaRequestHeaderDescribePartitions
+  ): Buffer {
+    const correlationID = this.buildCorrelationIDBuffer(header.correlationID);
+    const topicTagBuffer = this.buildTagBuffer(0);
+    const topicThrottleTimeMs = this.buildThrottleTimeBuffer(0);
+    const topicsArrLen = this.buildTopicsArrLenBuffer(header.topics.length + 1);
+    const topicErrorCode: Buffer = this.buildErrorCodeBuffer(3);
+
+    const topics = header.topics.map((topic) => {
+      const topicNameLen = Buffer.alloc(1);
+      topicNameLen.writeUInt8(topic.topicNameLen + 1);
+      const topicId = Buffer.alloc(16).fill(0);
+
+      return Buffer.concat([topicNameLen, topic.topicName, topicId]);
+    });
+
+    const topicIsInternal = Buffer.alloc(1);
+    topicIsInternal.writeUInt8(0, 0);
+    const topicPartition = Buffer.alloc(1);
+    topicPartition.writeUInt8(0, 0);
+    const topicAuthorizationOperations = Buffer.alloc(4);
+    topicAuthorizationOperations.writeInt32BE(0x00000df8, 0);
+    const topicCursor = Buffer.alloc(1);
+    topicCursor.writeUInt8(0xff, 0);
+
+    return Buffer.concat([
+      correlationID,
+      topicTagBuffer,
+      topicThrottleTimeMs,
+      topicsArrLen,
+      topicErrorCode,
+      ...topics,
+      topicIsInternal,
+      topicPartition,
+      topicAuthorizationOperations,
+      topicTagBuffer,
+      topicCursor,
+      topicTagBuffer,
+    ]);
+  }
+
+  private parseDescribePartitionsHeader(
+    data: Buffer,
+    startingPoint: number
+  ): { topics: ITopic[]; partitionLimit: number } {
+    const topics = [];
+    let { value, offset } = this.readVariant(data, startingPoint);
+    const numOfTopics = value - 1;
+
+    for (let i = 0; i < numOfTopics; i++) {
+      let { value: topicNameLen, offset: newOffset } = this.readVariant(
+        data,
+        offset
+      );
+      offset = newOffset;
+
+      topicNameLen--;
+      const topicName = data.slice(offset, offset + topicNameLen);
+      offset += topicNameLen;
+      offset++; // Topic tag buffer
+
+      topics.push({ topicName, topicNameLen });
+    }
+
+    const partitionLimit = data.readInt32BE(offset);
+
+    return { topics, partitionLimit };
   }
 
   private buildErrorCodeBuffer(errorCode: number): Buffer {
@@ -128,18 +229,48 @@ class KafkaHandler {
     ]);
   }
 
-  private buildThrottleTimeBuffer(throttleTime: number): Buffer {
+  private buildThrottleTimeBuffer(throttleTimeMs: number): Buffer {
     const throttleTimeBuffer = Buffer.alloc(this.THROTTLE_TIME_BUFFER_SIZE);
-    throttleTimeBuffer.writeInt32BE(throttleTime);
+    throttleTimeBuffer.writeInt32BE(throttleTimeMs);
 
     return throttleTimeBuffer;
   }
 
-  private buildTagBuffer(): Buffer {
+  private buildTagBuffer(value: number): Buffer {
     const tagBuffer = Buffer.alloc(this.TAG_BUFFER_SIZE);
-    tagBuffer.writeInt8(0);
+    tagBuffer.writeInt8(value);
 
     return tagBuffer;
+  }
+
+  private buildTopicsArrLenBuffer(value: number): Buffer {
+    const topicsArrBuffer = Buffer.alloc(1);
+    topicsArrBuffer.writeUInt8(value);
+
+    return topicsArrBuffer;
+  }
+
+  public readVariant(
+    data: Buffer,
+    offset: number
+  ): { value: number; offset: number } {
+    let value: number = 0;
+    let shift: number = 0;
+
+    while (true) {
+      value |= (0b01111111 & data[offset]) << shift;
+
+      if ((data[offset] & 0b10000000) === 0) {
+        break;
+      }
+
+      shift += 7;
+      offset++;
+    }
+
+    offset++;
+
+    return { value, offset };
   }
 }
 
