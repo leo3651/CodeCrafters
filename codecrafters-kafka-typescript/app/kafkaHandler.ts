@@ -8,7 +8,6 @@ import type {
 class KafkaHandler {
   private SUPPORTED_API_VERSIONS: number[] = [0, 1, 2, 3, 4];
 
-  private readonly API_VERSION_ITEM_BUFFER_SIZE = 7;
   private readonly API_KEY_BUFFER_SIZE = 2;
   private readonly API_MIN_VERSION_BUFFER_SIZE = 2;
   private readonly API_MAX_VERSION_BUFFER_SIZE = 2;
@@ -98,12 +97,11 @@ class KafkaHandler {
     const correlationID = this.buildCorrelationIDBuffer(header.correlationID);
     const topicTagBuffer = this.buildTagBuffer(0);
     const topicThrottleTimeMs = this.buildThrottleTimeBuffer(0);
-    const topicsArrLen = this.buildTopicsArrLenBuffer(header.topics.length + 1);
+    const topicsArrLen = this.writeUnsignedVariant(header.topics.length + 1);
     const topicErrorCode: Buffer = this.buildErrorCodeBuffer(3);
 
     const topics = header.topics.map((topic) => {
-      const topicNameLen = Buffer.alloc(1);
-      topicNameLen.writeUInt8(topic.topicNameLen + 1);
+      const topicNameLen = this.writeUnsignedVariant(topic.topicNameLen + 1);
       const topicId = Buffer.alloc(16).fill(0);
 
       return Buffer.concat([topicNameLen, topic.topicName, topicId]);
@@ -111,8 +109,7 @@ class KafkaHandler {
 
     const topicIsInternal = Buffer.alloc(1);
     topicIsInternal.writeUInt8(0, 0);
-    const topicPartition = Buffer.alloc(1);
-    topicPartition.writeUInt8(0, 0);
+    const topicPartition = this.writeUnsignedVariant(0 + 1);
     const topicAuthorizationOperations = Buffer.alloc(4);
     topicAuthorizationOperations.writeInt32BE(0x00000df8, 0);
     const topicCursor = Buffer.alloc(1);
@@ -184,24 +181,15 @@ class KafkaHandler {
   }
 
   private buildApiVersionsArrayBuffer(apiVersionsList: IApiVersion[]): Buffer {
-    const apiVersionsBufferLen =
-      apiVersionsList.length * this.API_VERSION_ITEM_BUFFER_SIZE + 1;
-
     const apiVersionsArrOfBuffers = apiVersionsList.map((apiVersion) =>
       this.buildApiVersionBuffer(apiVersion)
     );
 
-    const apiVersionsBuffer = Buffer.alloc(apiVersionsBufferLen);
+    const apiVersionsArrLenBuffer = this.writeUnsignedVariant(
+      apiVersionsList.length + 1
+    );
 
-    apiVersionsBuffer.writeUInt8(apiVersionsList.length + 1, 0);
-
-    let offset = 1;
-    for (const buffer of apiVersionsArrOfBuffers) {
-      buffer.copy(apiVersionsBuffer, offset);
-      offset += buffer.length;
-    }
-
-    return apiVersionsBuffer;
+    return Buffer.concat([apiVersionsArrLenBuffer, ...apiVersionsArrOfBuffers]);
   }
 
   private buildApiVersionBuffer(apiVersion: IApiVersion): Buffer {
@@ -243,13 +231,6 @@ class KafkaHandler {
     return tagBuffer;
   }
 
-  private buildTopicsArrLenBuffer(value: number): Buffer {
-    const topicsArrBuffer = Buffer.alloc(1);
-    topicsArrBuffer.writeUInt8(value);
-
-    return topicsArrBuffer;
-  }
-
   public readVariant(
     data: Buffer,
     offset: number
@@ -271,6 +252,24 @@ class KafkaHandler {
     offset++;
 
     return { value, offset };
+  }
+
+  public writeUnsignedVariant(value: number): Buffer {
+    const chunks: number[] = [];
+
+    while (true) {
+      const byte = value & 0b01111111;
+      value >>>= 7;
+
+      if (value === 0) {
+        chunks.push(byte);
+        break;
+      }
+
+      chunks.push(byte | 0b10000000);
+    }
+
+    return Buffer.from(chunks);
   }
 }
 
