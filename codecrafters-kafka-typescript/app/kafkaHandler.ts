@@ -1,13 +1,22 @@
-import type {
-  IApiVersion,
-  IKafkaRequestHeader,
-  IKafkaRequestHeaderDescribePartitions,
-  ITopic,
+import {
+  EErrorCode,
+  type IApiVersion,
+  type IKafkaRequestHeader,
+  type IKafkaRequestHeaderDescribePartitions,
+  type ITopic,
 } from "./model";
+import { utils } from "./utils";
+import {
+  KafkaClusterMetadataLogFile,
+  KafkaClusterMetadataPartitionRecord,
+} from "./metaDataParser";
 
 class KafkaHandler {
+  clusterMetadataLogFile!: KafkaClusterMetadataLogFile;
+
   private SUPPORTED_API_VERSIONS: number[] = [0, 1, 2, 3, 4];
 
+  // LENGTHS IN BYTES
   private readonly API_KEY_BUFFER_SIZE = 2;
   private readonly API_MIN_VERSION_BUFFER_SIZE = 2;
   private readonly API_MAX_VERSION_BUFFER_SIZE = 2;
@@ -17,7 +26,28 @@ class KafkaHandler {
   private readonly ERROR_CODE_BUFFER_SIZE = 2;
   private readonly THROTTLE_TIME_BUFFER_SIZE = 4;
 
-  constructor() {}
+  private readonly PARTITION_INDEX_BUFFER_SIZE = 4;
+  private readonly LEADER_ID_BUFFER_SIZE = 4;
+  private readonly LEADER_EPOCH_BUFFER_SIZE = 4;
+  private readonly REPLICAS_ARRAY_ITEM_BUFFER_SIZE = 4;
+  private readonly ISR_ARRAY_ITEM_BUFFER_SIZE = 4;
+  private readonly ELIGIBLE_REPLICAS_ARR_IT_BUF_SIZE = 4;
+  private readonly LAST_KNOWN_ELR_ARR_IT_BUF_SIZE = 4;
+  private readonly OFFLINE_REPLICAS_ARR_IT_BUF_SIZE = 4;
+
+  constructor() {
+    const fileLocation = process.argv[2];
+    if (fileLocation) {
+      try {
+        this.clusterMetadataLogFile = KafkaClusterMetadataLogFile.fromFile(
+          "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
+        );
+        console.log(this.clusterMetadataLogFile);
+      } catch (err) {
+        console.log("Could not read cluster metadata file", err);
+      }
+    }
+  }
 
   public createResponse(data: Buffer): Buffer {
     let responseBody: Buffer = Buffer.alloc(0);
@@ -39,6 +69,8 @@ class KafkaHandler {
       clientIDLen,
       clientID,
     };
+    console.log("HEADER: ");
+    console.log(header);
 
     // Describe partitions
     if (reqApiKey === 75) {
@@ -47,7 +79,7 @@ class KafkaHandler {
         relevantDataOffset
       );
 
-      responseBody = this.createDescribePartitionsResHeaderBody({
+      responseBody = this.createV0DescribePartitionsResHeaderBody({
         ...header,
         ...describePartitionsReqHeader,
       });
@@ -63,11 +95,41 @@ class KafkaHandler {
     return Buffer.concat([mesLenBuffer, responseBody]);
   }
 
-  public createV4ResponseHeaderBody(header: IKafkaRequestHeader): Buffer {
-    let errorCode = 0;
+  private parseDescribePartitionsHeader(
+    data: Buffer,
+    offset: number
+  ): { topics: ITopic[]; partitionLimit: number } {
+    const topics = [];
+
+    const { value, length } = utils.readVariant(data.subarray(offset), false);
+    const numOfTopics = value - 1;
+    offset += length;
+
+    for (let i = 0; i < numOfTopics; i++) {
+      let { value: topicNameLen, length } = utils.readVariant(
+        data.subarray(offset),
+        false
+      );
+      offset += length;
+
+      topicNameLen--;
+      const topicName = data.slice(offset, offset + topicNameLen);
+      offset += topicNameLen;
+      offset++;
+
+      topics.push({ topicName, topicNameLen });
+    }
+
+    const partitionLimit = data.readInt32BE(offset);
+
+    return { topics, partitionLimit };
+  }
+
+  private createV4ResponseHeaderBody(header: IKafkaRequestHeader): Buffer {
+    let errorCode: EErrorCode = EErrorCode.NO_ERROR;
 
     if (!this.SUPPORTED_API_VERSIONS.includes(header.reqApiVersion)) {
-      errorCode = 35;
+      errorCode = EErrorCode.UNSUPPORTED_VERSION;
     }
 
     const correlationIDBuffer = this.buildCorrelationIDBuffer(
@@ -75,11 +137,15 @@ class KafkaHandler {
     );
 
     const errorCodeBuffer = this.buildErrorCodeBuffer(errorCode);
+
     const apiVersionBuffer = this.buildApiVersionsArrayBuffer([
       { apiKey: header.reqApiKey, maxVersion: 4, minVersion: 0 },
       { apiKey: 75, maxVersion: 0, minVersion: 0 },
+      { apiKey: 1, maxVersion: 16, minVersion: 0 },
     ]);
+
     const throttleTimeBuffer = this.buildThrottleTimeBuffer(0);
+
     const tagBuffer = this.buildTagBuffer(0);
 
     return Buffer.concat([
@@ -91,75 +157,212 @@ class KafkaHandler {
     ]);
   }
 
-  private createDescribePartitionsResHeaderBody(
+  private createV0DescribePartitionsResHeaderBody(
     header: IKafkaRequestHeaderDescribePartitions
   ): Buffer {
-    const correlationID = this.buildCorrelationIDBuffer(header.correlationID);
-    const topicTagBuffer = this.buildTagBuffer(0);
-    const topicThrottleTimeMs = this.buildThrottleTimeBuffer(0);
-    const topicsArrLen = this.writeUnsignedVariant(header.topics.length + 1);
-    const topicErrorCode: Buffer = this.buildErrorCodeBuffer(3);
+    const correlationIDBuf = this.buildCorrelationIDBuffer(
+      header.correlationID
+    );
+    const tagBuffer = this.buildTagBuffer(0);
 
-    const topics = header.topics.map((topic) => {
-      const topicNameLen = this.writeUnsignedVariant(topic.topicNameLen + 1);
-      const topicId = Buffer.alloc(16).fill(0);
+    const topicThrottleTimeMsBuf = this.buildThrottleTimeBuffer(0);
+    const topicsArrLenBuf = utils.writeUnsignedVariant(
+      header.topics.length + 1
+    );
+    const topicsBufArr = this.createTopics(header);
 
-      return Buffer.concat([topicNameLen, topic.topicName, topicId]);
-    });
-
-    const topicIsInternal = Buffer.alloc(1);
-    topicIsInternal.writeUInt8(0, 0);
-    const topicPartition = this.writeUnsignedVariant(0 + 1);
-    const topicAuthorizationOperations = Buffer.alloc(4);
-    topicAuthorizationOperations.writeInt32BE(0x00000df8, 0);
-    const topicCursor = Buffer.alloc(1);
-    topicCursor.writeUInt8(0xff, 0);
+    const cursorBuf = Buffer.alloc(1);
+    cursorBuf.writeUInt8(0xff, 0);
 
     return Buffer.concat([
-      correlationID,
-      topicTagBuffer,
-      topicThrottleTimeMs,
-      topicsArrLen,
-      topicErrorCode,
-      ...topics,
-      topicIsInternal,
-      topicPartition,
+      correlationIDBuf,
+      tagBuffer,
+      topicThrottleTimeMsBuf,
+      topicsArrLenBuf,
+      ...topicsBufArr,
+      cursorBuf,
+      tagBuffer,
+    ]);
+  }
+
+  private createTopics(
+    header: IKafkaRequestHeaderDescribePartitions
+  ): Buffer[] {
+    const metaFileTopicRecords = this.clusterMetadataLogFile.getTopicRecords();
+
+    return header.topics.flatMap((topic) => {
+      const matchingTopicRecord = metaFileTopicRecords.find(
+        (metaFileTopic) => metaFileTopic.name === topic.topicName.toString()
+      );
+
+      const errorCode = matchingTopicRecord
+        ? EErrorCode.NO_ERROR
+        : EErrorCode.UNKNOWN_TOPIC_OR_PARTITION;
+
+      const topicIdBuf = matchingTopicRecord?.uuid || Buffer.alloc(16);
+
+      const metaFilePartitionRecords =
+        this.clusterMetadataLogFile.getPartitionRecordsMatchTopicUuid(
+          topicIdBuf
+        );
+      const partitionRecordsResponseBuffer = metaFilePartitionRecords.flatMap(
+        (partitionRecord, index) =>
+          this.createTopicPartitionItem(partitionRecord, index)
+      );
+
+      return this.createTopic(
+        errorCode,
+        topic.topicName.length,
+        topic.topicName,
+        topicIdBuf,
+        metaFilePartitionRecords.length,
+        partitionRecordsResponseBuffer
+      );
+    });
+  }
+
+  private createTopic(
+    errorCode: EErrorCode,
+    topicNameLen: number,
+    topicNameBuf: Buffer,
+    topicIdBuf: Buffer,
+    topicPartitionsLenBuf: number,
+    topicPartitionsBuf: Buffer[]
+  ): Buffer {
+    const topicErrorCodeBuf: Buffer = this.buildErrorCodeBuffer(errorCode);
+    const topicNameLenBuf = utils.writeUnsignedVariant(topicNameLen + 1);
+    const topicIsInternalBuf = Buffer.alloc(1);
+    topicIsInternalBuf.writeUInt8(0, 0);
+
+    const partitionsArrayLengthBuf = utils.writeUnsignedVariant(
+      topicPartitionsLenBuf + 1
+    );
+
+    const topicAuthorizationOperations = Buffer.alloc(4);
+    topicAuthorizationOperations.writeInt32BE(0x00000df8, 0);
+
+    const topicTagBuffer = this.buildTagBuffer(0);
+
+    return Buffer.concat([
+      topicErrorCodeBuf,
+      topicNameLenBuf,
+      topicNameBuf,
+      topicIdBuf,
+      topicIsInternalBuf,
+      partitionsArrayLengthBuf,
+      ...topicPartitionsBuf,
       topicAuthorizationOperations,
-      topicTagBuffer,
-      topicCursor,
       topicTagBuffer,
     ]);
   }
 
-  private parseDescribePartitionsHeader(
-    data: Buffer,
-    startingPoint: number
-  ): { topics: ITopic[]; partitionLimit: number } {
-    const topics = [];
-    let { value, offset } = this.readVariant(data, startingPoint);
-    const numOfTopics = value - 1;
+  private createTopicPartitionItem(
+    partitionRecord: KafkaClusterMetadataPartitionRecord,
+    index: number
+  ): Buffer {
+    const errorCodeBuffer = Buffer.alloc(this.ERROR_CODE_BUFFER_SIZE);
+    errorCodeBuffer.writeUInt16BE(EErrorCode.NO_ERROR);
 
-    for (let i = 0; i < numOfTopics; i++) {
-      let { value: topicNameLen, offset: newOffset } = this.readVariant(
-        data,
-        offset
+    const partitionIndexBuffer = Buffer.alloc(this.PARTITION_INDEX_BUFFER_SIZE);
+    partitionIndexBuffer.writeUInt32BE(index);
+
+    const leaderIdBuffer = Buffer.alloc(this.LEADER_ID_BUFFER_SIZE);
+    leaderIdBuffer.writeUInt32BE(partitionRecord.leader);
+
+    const leaderEpochBuffer = Buffer.alloc(this.LEADER_EPOCH_BUFFER_SIZE);
+    leaderEpochBuffer.writeUInt32BE(partitionRecord.leaderEpoch);
+
+    const replicaLength = partitionRecord.replicas.length;
+    const replicaLengthBuffer = utils.writeUnsignedVariant(replicaLength + 1); // +1 for the length byte
+
+    const replicasBuffer = Buffer.alloc(
+      replicaLength * this.REPLICAS_ARRAY_ITEM_BUFFER_SIZE
+    );
+
+    partitionRecord.replicas.forEach((replica, index) => {
+      replicasBuffer.writeUInt32BE(
+        replica,
+        index * this.REPLICAS_ARRAY_ITEM_BUFFER_SIZE
       );
-      offset = newOffset;
+    });
 
-      topicNameLen--;
-      const topicName = data.slice(offset, offset + topicNameLen);
-      offset += topicNameLen;
-      offset++; // Topic tag buffer
+    const isr: number[] = [1];
+    const isrLength = isr.length;
+    const isrLengthBuffer = utils.writeUnsignedVariant(isrLength + 1); // +1 for the length byte
+    const isrBuffer = Buffer.alloc(isrLength * this.ISR_ARRAY_ITEM_BUFFER_SIZE);
+    isr.forEach((isr, index) => {
+      isrBuffer.writeUInt32BE(isr, index * this.ISR_ARRAY_ITEM_BUFFER_SIZE);
+    });
 
-      topics.push({ topicName, topicNameLen });
-    }
+    const eligibleReplicas: number[] = [];
+    const eligibleReplicasLength = eligibleReplicas.length;
+    const eligibleReplicasLengthBuffer = utils.writeUnsignedVariant(
+      eligibleReplicasLength + 1 // +1 for the length byte
+    );
+    const eligibleReplicasBuffer = Buffer.alloc(
+      eligibleReplicasLength * this.ELIGIBLE_REPLICAS_ARR_IT_BUF_SIZE
+    );
+    eligibleReplicas.forEach((replica, index) => {
+      eligibleReplicasBuffer.writeUInt32BE(
+        replica,
+        index * this.ELIGIBLE_REPLICAS_ARR_IT_BUF_SIZE
+      );
+    });
 
-    const partitionLimit = data.readInt32BE(offset);
+    const lastKnownELR: number[] = [];
+    const lastKnownELRLength = lastKnownELR.length;
+    const lastKnownELRLengthBuffer = utils.writeUnsignedVariant(
+      lastKnownELRLength + 1 // +1 for the length byte
+    );
+    const lastKnownELRBuffer = Buffer.alloc(
+      lastKnownELRLength * this.LAST_KNOWN_ELR_ARR_IT_BUF_SIZE
+    );
+    lastKnownELR.forEach((elr, index) => {
+      lastKnownELRBuffer.writeUInt32BE(
+        elr,
+        index * this.LAST_KNOWN_ELR_ARR_IT_BUF_SIZE
+      );
+    });
 
-    return { topics, partitionLimit };
+    const offlineReplicas: number[] = [];
+    const offlineReplicasLength = offlineReplicas.length;
+    const offlineReplicasLengthBuffer = utils.writeUnsignedVariant(
+      offlineReplicasLength + 1 // +1 for the length byte
+    );
+    const offlineReplicasBuffer = Buffer.alloc(
+      offlineReplicasLength * this.OFFLINE_REPLICAS_ARR_IT_BUF_SIZE
+    );
+    offlineReplicas.forEach((replica, index) => {
+      offlineReplicasBuffer.writeUInt32BE(
+        replica,
+        index * this.OFFLINE_REPLICAS_ARR_IT_BUF_SIZE
+      );
+    });
+
+    const tagBufferValue = 0;
+    const tagBuffer = Buffer.alloc(this.TAG_BUFFER_SIZE);
+    tagBuffer.writeUInt8(tagBufferValue);
+
+    return Buffer.concat([
+      errorCodeBuffer,
+      partitionIndexBuffer,
+      leaderIdBuffer,
+      leaderEpochBuffer,
+      replicaLengthBuffer,
+      replicasBuffer,
+      isrLengthBuffer,
+      isrBuffer,
+      eligibleReplicasLengthBuffer,
+      eligibleReplicasBuffer,
+      lastKnownELRLengthBuffer,
+      lastKnownELRBuffer,
+      offlineReplicasLengthBuffer,
+      offlineReplicasBuffer,
+      tagBuffer,
+    ]);
   }
 
-  private buildErrorCodeBuffer(errorCode: number): Buffer {
+  private buildErrorCodeBuffer(errorCode: EErrorCode): Buffer {
     const errorCodeBuffer = Buffer.alloc(this.ERROR_CODE_BUFFER_SIZE);
     errorCodeBuffer.writeInt16BE(errorCode);
 
@@ -185,7 +388,7 @@ class KafkaHandler {
       this.buildApiVersionBuffer(apiVersion)
     );
 
-    const apiVersionsArrLenBuffer = this.writeUnsignedVariant(
+    const apiVersionsArrLenBuffer = utils.writeUnsignedVariant(
       apiVersionsList.length + 1
     );
 
@@ -229,47 +432,6 @@ class KafkaHandler {
     tagBuffer.writeInt8(value);
 
     return tagBuffer;
-  }
-
-  public readVariant(
-    data: Buffer,
-    offset: number
-  ): { value: number; offset: number } {
-    let value: number = 0;
-    let shift: number = 0;
-
-    while (true) {
-      value |= (0b01111111 & data[offset]) << shift;
-
-      if ((data[offset] & 0b10000000) === 0) {
-        break;
-      }
-
-      shift += 7;
-      offset++;
-    }
-
-    offset++;
-
-    return { value, offset };
-  }
-
-  public writeUnsignedVariant(value: number): Buffer {
-    const chunks: number[] = [];
-
-    while (true) {
-      const byte = value & 0b01111111;
-      value >>>= 7;
-
-      if (value === 0) {
-        chunks.push(byte);
-        break;
-      }
-
-      chunks.push(byte | 0b10000000);
-    }
-
-    return Buffer.from(chunks);
   }
 }
 

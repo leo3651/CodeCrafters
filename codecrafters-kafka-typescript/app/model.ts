@@ -30,3 +30,16 @@ export interface ITopic {
   topicName: Buffer;
   topicNameLen: number;
 }
+
+export const enum EMetadataRecordType {
+  TOPIC = 2,
+  PARTITION = 3,
+  FEATURE_LEVEL = 12,
+}
+
+export const enum EErrorCode {
+  UNKNOWN_TOPIC = 100,
+  UNSUPPORTED_VERSION = 35,
+  UNKNOWN_TOPIC_OR_PARTITION = 3,
+  NO_ERROR = 0,
+}
