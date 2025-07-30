@@ -1,6 +1,6 @@
 import { EMetadataRecordType } from "./model";
-import { utils } from "./utils";
 import fs from "fs";
+import { readVariant } from "./utils";
 
 export class KafkaClusterMetadataLogFile {
   constructor(public batches: KafkaClusterMetadataRecordBatch[]) {}
@@ -143,8 +143,10 @@ class KafkaClusterMetadataRecordBatch {
     const recordBatchItems: KafkaClusterMetadataRecordBatchItem[] = [];
 
     for (let i = 0; i < recordCount; i++) {
-      const { value: recordLength, length: recordLengthSize } =
-        utils.readVariant(buffer.subarray(currentOffset), true);
+      const { value: recordLength, length: recordLengthSize } = readVariant(
+        buffer.subarray(currentOffset),
+        true
+      );
       currentOffset += recordLengthSize;
 
       const attributes = buffer.readUInt8(currentOffset);
@@ -156,13 +158,13 @@ class KafkaClusterMetadataRecordBatch {
       const offsetDelta = buffer.readInt8(currentOffset);
       currentOffset += 1;
 
-      const { value: keyLength, length: keyLengthSize } = utils.readVariant(
+      const { value: keyLength, length: keyLengthSize } = readVariant(
         buffer.subarray(currentOffset),
         true
       );
       currentOffset += keyLengthSize;
 
-      const { value: valueLength, length: valueLengthSize } = utils.readVariant(
+      const { value: valueLength, length: valueLengthSize } = readVariant(
         buffer.subarray(currentOffset),
         true
       );

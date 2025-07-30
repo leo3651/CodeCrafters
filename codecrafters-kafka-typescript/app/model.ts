@@ -43,3 +43,9 @@ export const enum EErrorCode {
   UNKNOWN_TOPIC_OR_PARTITION = 3,
   NO_ERROR = 0,
 }
+
+export enum EByteSize {
+  writeInt8 = 1,
+  writeInt16BE = 2,
+  writeInt32BE = 4,
+}
