@@ -3,43 +3,31 @@ import {
   EErrorCode,
   type IApiVersion,
   type IKafkaRequestHeader,
-  type IKafkaRequestHeaderDescribePartitions,
+  type IKafkaRequestDescribePartitions,
   type ITopic,
+  type ITopicFetchItem,
+  type IKafkaFetchRequest,
 } from "./model";
 import {
   KafkaClusterMetadataLogFile,
   KafkaClusterMetadataPartitionRecord,
+  KafkaClusterMetadataRecordBatch,
+  KafkaClusterMetadataTopicRecord,
 } from "./metaDataParser";
 import { readVariant, writeUnsignedVariant } from "./utils";
+import { KafkaPartitionLogFile } from "./kafkaPartitionsLogFile";
 
 class KafkaHandler {
   clusterMetadataLogFile!: KafkaClusterMetadataLogFile;
 
   private SUPPORTED_API_VERSIONS: number[] = [0, 1, 2, 3, 4];
 
-  // LENGTHS IN BYTES
-  private readonly API_KEY_BUFFER_SIZE = 2;
-  private readonly API_MIN_VERSION_BUFFER_SIZE = 2;
-  private readonly API_MAX_VERSION_BUFFER_SIZE = 2;
-  private readonly TAG_BUFFER_SIZE = 1;
-  private readonly CORRELATION_ID_BUFFER_SIZE = 4;
-  private readonly MESSAGE_LENGTH_BUFFER_SIZE = 4;
-  private readonly ERROR_CODE_BUFFER_SIZE = 2;
-  private readonly THROTTLE_TIME_BUFFER_SIZE = 4;
-
-  private readonly TOPIC_AUTH_OPERATIONS_BUFFER_SIZE = 4;
-  private readonly TOPIC_IS_INTERNAL_BUFFER_SIZE = 1;
-
-  private readonly PARTITION_INDEX_BUFFER_SIZE = 4;
-  private readonly LEADER_ID_BUFFER_SIZE = 4;
-  private readonly LEADER_EPOCH_BUFFER_SIZE = 4;
   private readonly REPLICAS_ARRAY_ITEM_BUFFER_SIZE = 4;
   private readonly ISR_ARRAY_ITEM_BUFFER_SIZE = 4;
   private readonly ELIGIBLE_REPLICAS_ARR_IT_BUF_SIZE = 4;
   private readonly LAST_KNOWN_ELR_ARR_IT_BUF_SIZE = 4;
   private readonly OFFLINE_REPLICAS_ARR_IT_BUF_SIZE = 4;
 
-  private readonly SESSION_ID_BUFFER_SIZE = 4;
   constructor() {
     const fileLocation = process.argv[2];
     if (fileLocation) {
@@ -97,8 +85,10 @@ class KafkaHandler {
 
     // Fetch
     else if (reqApiKey === 1) {
+      const reqTopics = this.parseFetchHeader(data, relevantDataOffset);
+
       responseBody = this.createFetchResponseBody(
-        header,
+        { ...header, topics: reqTopics },
         0,
         EErrorCode.NO_ERROR,
         0
@@ -106,7 +96,7 @@ class KafkaHandler {
     }
 
     const mesLenBuffer = this.buildBuffer(
-      this.MESSAGE_LENGTH_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       responseBody.length
     );
 
@@ -144,6 +134,68 @@ class KafkaHandler {
     return { topics, partitionLimit };
   }
 
+  private parseFetchHeader(data: Buffer, offset: number) {
+    const maxWaitTime = data.readUInt32BE(offset);
+    offset += 4;
+    const minBytes = data.readUInt32BE(offset);
+    offset += 4;
+    const maxBytes = data.readUInt32BE(offset);
+    offset += 4;
+    const isolationLevel = data.readUInt8(offset);
+    offset += 1;
+    const sessionId = data.readUInt32BE(offset);
+    offset += 4;
+    const sessionEpoch = data.readUInt32BE(offset);
+    offset += 4;
+
+    const { value: numOfTopicsPlusOne, length: numOfTopicsBufferLength } =
+      readVariant(data.subarray(offset), false);
+    offset += numOfTopicsBufferLength;
+
+    const numOfTopics = numOfTopicsPlusOne - 1;
+
+    let topics: ITopicFetchItem[] = [];
+    for (let i = 0; i < numOfTopics; i++) {
+      const topicItem = this.parseFetchTopicRecord(data.subarray(offset));
+      offset += topicItem.bufferSize;
+      topics.push(topicItem);
+    }
+
+    return topics;
+  }
+
+  private parseFetchTopicRecord(data: Buffer) {
+    let offset = 0;
+
+    const topicId = data.subarray(offset, offset + 16);
+    offset += 16;
+
+    const {
+      value: numOfPartitionsPlusOne,
+      length: numOfPartitionsBufferLength,
+    } = readVariant(data.subarray(offset), false);
+
+    offset += numOfPartitionsBufferLength;
+    const numOfPartitions = numOfPartitionsPlusOne - 1;
+
+    let partitions = [];
+    for (let i = 0; i < numOfPartitions; i++) {
+      const partitionId = data.readUInt32BE(offset);
+      offset += 4;
+
+      partitions.push(partitionId);
+    }
+    const bufferSize = 16 + numOfPartitionsBufferLength + numOfPartitions * 4;
+
+    const topicItem: ITopicFetchItem = {
+      partitions,
+      topicId,
+      bufferSize,
+    };
+
+    return topicItem;
+  }
+
   private createV4ResponseHeaderBody(header: IKafkaRequestHeader): Buffer {
     let errorCode: EErrorCode = EErrorCode.NO_ERROR;
 
@@ -152,14 +204,11 @@ class KafkaHandler {
     }
 
     const correlationIDBuffer = this.buildBuffer(
-      this.CORRELATION_ID_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       header.correlationID
     );
 
-    const errorCodeBuffer = this.buildBuffer(
-      this.ERROR_CODE_BUFFER_SIZE,
-      errorCode
-    );
+    const errorCodeBuffer = this.buildBuffer(EByteSize.writeInt16BE, errorCode);
 
     const apiVersionBuffer = this.buildApiVersionsArrayBuffer([
       { apiKey: header.reqApiKey, maxVersion: 4, minVersion: 0 },
@@ -167,12 +216,9 @@ class KafkaHandler {
       { apiKey: 1, maxVersion: 16, minVersion: 0 },
     ]);
 
-    const throttleTimeBuffer = this.buildBuffer(
-      this.THROTTLE_TIME_BUFFER_SIZE,
-      0
-    );
+    const throttleTimeBuffer = this.buildBuffer(EByteSize.writeInt32BE, 0);
 
-    const tagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
     return Buffer.concat([
       correlationIDBuffer,
@@ -184,19 +230,16 @@ class KafkaHandler {
   }
 
   private createV0DescribePartitionsResHeaderBody(
-    header: IKafkaRequestHeaderDescribePartitions
+    header: IKafkaRequestDescribePartitions
   ): Buffer {
     const correlationIDBuf = this.buildBuffer(
-      this.CORRELATION_ID_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       header.correlationID
     );
 
-    const tagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
-    const topicThrottleTimeMsBuf = this.buildBuffer(
-      this.THROTTLE_TIME_BUFFER_SIZE,
-      0
-    );
+    const topicThrottleTimeMsBuf = this.buildBuffer(EByteSize.writeInt32BE, 0);
 
     const topicsArrLenBuf = writeUnsignedVariant(header.topics.length + 1);
     const topicsBufArr = this.createTopics(header);
@@ -216,30 +259,51 @@ class KafkaHandler {
   }
 
   private createFetchResponseBody(
-    header: IKafkaRequestHeader,
+    header: IKafkaFetchRequest,
     throttleTime: number,
     errorCode: EErrorCode,
     sessionId: number
   ): Buffer {
+    console.log("TOPICS", header);
+
+    const topicsInResponse = header.topics.map((topicReq) => {
+      const partitionRecordsResponse = topicReq.partitions.map(
+        (partitionId) => {
+          const matchedTopicRecord =
+            this.clusterMetadataLogFile.getMatchTopicRecord(topicReq.topicId);
+          console.log(
+            `matchedTopicRecord: ${matchedTopicRecord?.name} - partitionIndex: ${partitionId}`
+          );
+          return this.createFetchTopicPartitionItem(
+            partitionId,
+            matchedTopicRecord
+          );
+        }
+      );
+
+      const topic = this.createFetchTopicItem(
+        topicReq.topicId, // topicId
+        partitionRecordsResponse
+      );
+
+      return topic;
+    });
+
     const correlationIDBuffer = this.buildBuffer(
-      this.CORRELATION_ID_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       header.correlationID
     );
     const throttleTimeBuffer = this.buildBuffer(
-      this.THROTTLE_TIME_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       throttleTime
     );
-    const errorCodeBuffer = this.buildBuffer(
-      this.ERROR_CODE_BUFFER_SIZE,
-      errorCode
-    );
-    const sessionIdBuffer = this.buildBuffer(
-      this.SESSION_ID_BUFFER_SIZE,
-      sessionId
-    );
+    const errorCodeBuffer = this.buildBuffer(EByteSize.writeInt16BE, errorCode);
+    const sessionIdBuffer = this.buildBuffer(EByteSize.writeInt32BE, sessionId);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
-    const numResponsesBuffer = writeUnsignedVariant(0);
-    const tagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const numResponsesBuffer = writeUnsignedVariant(
+      topicsInResponse.length + 1
+    );
 
     return Buffer.concat([
       correlationIDBuffer,
@@ -248,13 +312,87 @@ class KafkaHandler {
       errorCodeBuffer,
       sessionIdBuffer,
       numResponsesBuffer,
+      ...topicsInResponse,
       tagBuffer,
     ]);
   }
 
-  private createTopics(
-    header: IKafkaRequestHeaderDescribePartitions
-  ): Buffer[] {
+  private createFetchTopicPartitionItem(
+    partitionId: number,
+    topic: KafkaClusterMetadataTopicRecord | undefined
+  ): Buffer {
+    let records: KafkaClusterMetadataRecordBatch[] = [];
+    const errorCode = topic ? EErrorCode.NO_ERROR : EErrorCode.UNKNOWN_TOPIC;
+
+    if (errorCode === EErrorCode.NO_ERROR) {
+      const recordLogFile = KafkaPartitionLogFile.fromFile(
+        `/tmp/kraft-combined-logs/${
+          topic!.name
+        }-${partitionId}/00000000000000000000.log`
+      );
+      records = recordLogFile.getRecords();
+      console.log(records);
+    }
+
+    const totalRecordsSize = records.reduce(
+      (total, record) => total + record.bufferSize(),
+      0
+    );
+
+    const compactRecordsLengthBuffer = writeUnsignedVariant(totalRecordsSize);
+
+    const partitionIndexBuffer = this.buildBuffer(
+      EByteSize.writeInt32BE,
+      partitionId
+    );
+    const errorCodeBuffer = this.buildBuffer(EByteSize.writeInt16BE, errorCode);
+    const highWaterMarkBuffer = this.buildBuffer(
+      EByteSize.writeBigUInt64BE,
+      0n
+    );
+    const lastStableOffsetBuffer = this.buildBuffer(
+      EByteSize.writeBigUInt64BE,
+      0n
+    );
+    const logStartOffsetBuffer = this.buildBuffer(
+      EByteSize.writeBigUInt64BE,
+      0n
+    );
+    const abortedTransactionsBuffer = writeUnsignedVariant(0);
+    const preferredReadReplicasBuffer = this.buildBuffer(
+      EByteSize.writeInt32BE,
+      0
+    );
+    const tagFieldsArrayLengthBuffer = writeUnsignedVariant(0);
+    const recordsBuffer = Buffer.from([]);
+
+    return Buffer.concat([
+      partitionIndexBuffer,
+      errorCodeBuffer,
+      highWaterMarkBuffer,
+      lastStableOffsetBuffer,
+      logStartOffsetBuffer,
+      abortedTransactionsBuffer,
+      preferredReadReplicasBuffer,
+      compactRecordsLengthBuffer,
+      recordsBuffer,
+      tagFieldsArrayLengthBuffer,
+    ]);
+  }
+
+  private createFetchTopicItem(topicId: Buffer, partitions: Buffer[]): Buffer {
+    const numOfPartitionsBuffer = writeUnsignedVariant(partitions.length + 1);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
+
+    return Buffer.concat([
+      topicId,
+      numOfPartitionsBuffer,
+      ...partitions,
+      tagBuffer,
+    ]);
+  }
+
+  private createTopics(header: IKafkaRequestDescribePartitions): Buffer[] {
     const metaFileTopicRecords = this.clusterMetadataLogFile.getTopicRecords();
 
     return header.topics.flatMap((topic) => {
@@ -297,25 +435,24 @@ class KafkaHandler {
     topicPartitionsBuf: Buffer[]
   ): Buffer {
     const topicErrorCodeBuf: Buffer = this.buildBuffer(
-      this.ERROR_CODE_BUFFER_SIZE,
+      EByteSize.writeInt16BE,
       errorCode
     );
+
     const topicNameLenBuf = writeUnsignedVariant(topicNameLen + 1);
-    const topicIsInternalBuf = this.buildBuffer(
-      this.TOPIC_IS_INTERNAL_BUFFER_SIZE,
-      0
-    );
+
+    const topicIsInternalBuf = this.buildBuffer(EByteSize.writeInt8, 0);
 
     const partitionsArrayLengthBuf = writeUnsignedVariant(
       topicPartitionsLenBuf + 1
     );
 
     const topicAuthorizationOperations = this.buildBuffer(
-      this.TOPIC_AUTH_OPERATIONS_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       0x00000df8
     );
 
-    const topicTagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const topicTagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
     return Buffer.concat([
       topicErrorCodeBuf,
@@ -335,22 +472,22 @@ class KafkaHandler {
     index: number
   ): Buffer {
     const errorCodeBuffer = this.buildBuffer(
-      this.ERROR_CODE_BUFFER_SIZE,
+      EByteSize.writeInt16BE,
       EErrorCode.NO_ERROR
     );
 
     const partitionIndexBuffer = this.buildBuffer(
-      this.PARTITION_INDEX_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       index
     );
 
     const leaderIdBuffer = this.buildBuffer(
-      this.LEADER_ID_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       partitionRecord.leader
     );
 
     const leaderEpochBuffer = this.buildBuffer(
-      this.LEADER_EPOCH_BUFFER_SIZE,
+      EByteSize.writeInt32BE,
       partitionRecord.leaderEpoch
     );
 
@@ -421,7 +558,7 @@ class KafkaHandler {
       );
     });
 
-    const tagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
     return Buffer.concat([
       errorCodeBuffer,
@@ -457,24 +594,24 @@ class KafkaHandler {
   private buildApiVersionBuffer(apiVersion: IApiVersion): Buffer {
     // API key (int16, 2 bytes)
     const apiKeyBuffer = this.buildBuffer(
-      this.API_KEY_BUFFER_SIZE,
+      EByteSize.writeInt16BE,
       apiVersion.apiKey
     );
 
     // Min version (int16, 2 bytes)
     const apiMinVersionBuffer = this.buildBuffer(
-      this.API_MIN_VERSION_BUFFER_SIZE,
+      EByteSize.writeInt16BE,
       apiVersion.minVersion
     );
 
     // Max version (int16, 2 bytes)
     const apiMaxVersionBuffer = this.buildBuffer(
-      this.API_MAX_VERSION_BUFFER_SIZE,
+      EByteSize.writeInt16BE,
       apiVersion.maxVersion
     );
 
     // Tag buffer (optional, 1 bytes, set to 0)
-    const tagBuffer = this.buildBuffer(this.TAG_BUFFER_SIZE, 0);
+    const tagBuffer = this.buildBuffer(EByteSize.writeInt8, 0);
 
     return Buffer.concat([
       apiKeyBuffer,
@@ -484,21 +621,41 @@ class KafkaHandler {
     ]);
   }
 
-  private buildBuffer(bytesToWrite: EByteSize, value: number): Buffer {
+  private buildBuffer(bytesToWrite: EByteSize, value: number | bigint): Buffer {
     let buffer = Buffer.alloc(0);
 
     switch (bytesToWrite) {
       case EByteSize.writeInt8:
+        if (typeof value !== "number") {
+          throw new Error("Expected number");
+        }
+
         buffer = Buffer.alloc(1);
         buffer.writeInt8(value);
         break;
       case EByteSize.writeInt16BE:
+        if (typeof value !== "number") {
+          throw new Error("Expected number");
+        }
+
         buffer = Buffer.alloc(2);
         buffer.writeInt16BE(value);
         break;
       case EByteSize.writeInt32BE:
+        if (typeof value !== "number") {
+          throw new Error("Expected number");
+        }
+
         buffer = Buffer.alloc(4);
         buffer.writeInt32BE(value);
+        break;
+      case EByteSize.writeBigUInt64BE:
+        if (typeof value !== "bigint") {
+          throw new Error("Expected number");
+        }
+
+        buffer = Buffer.alloc(8);
+        buffer.writeBigUInt64BE(value);
         break;
 
       default:

@@ -10,10 +10,13 @@ export interface IKafkaRequestHeader extends IKafkaHeader {
   clientIDLen: number;
 }
 
-export interface IKafkaRequestHeaderDescribePartitions
-  extends IKafkaRequestHeader {
+export interface IKafkaRequestDescribePartitions extends IKafkaRequestHeader {
   topics: ITopic[];
   partitionLimit: number;
+}
+
+export interface IKafkaFetchRequest extends IKafkaRequestHeader {
+  topics: ITopicFetchItem[];
 }
 
 export interface IKafkaResponseHeader extends IKafkaHeader {
@@ -48,4 +51,11 @@ export enum EByteSize {
   writeInt8 = 1,
   writeInt16BE = 2,
   writeInt32BE = 4,
+  writeBigUInt64BE = 8,
+}
+
+export interface ITopicFetchItem {
+  partitions: number[];
+  topicId: Buffer;
+  bufferSize: number;
 }

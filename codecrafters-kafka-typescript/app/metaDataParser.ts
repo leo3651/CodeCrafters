@@ -71,7 +71,7 @@ export class KafkaClusterMetadataLogFile {
   }
 }
 
-class KafkaClusterMetadataRecordBatch {
+export class KafkaClusterMetadataRecordBatch {
   constructor(
     public baseOffset: bigint,
     public batchLength: number,
