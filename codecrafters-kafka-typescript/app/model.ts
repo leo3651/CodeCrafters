@@ -48,10 +48,17 @@ export const enum EErrorCode {
 }
 
 export enum EByteSize {
-  writeInt8 = 1,
-  writeInt16BE = 2,
-  writeInt32BE = 4,
-  writeBigUInt64BE = 8,
+  writeUInt8,
+  writeInt8,
+
+  writeUInt16BE,
+  writeInt16BE,
+
+  writeUInt32BE,
+  writeInt32BE,
+
+  writeBigUInt64BE,
+  writeBigInt64BE,
 }
 
 export interface ITopicFetchItem {

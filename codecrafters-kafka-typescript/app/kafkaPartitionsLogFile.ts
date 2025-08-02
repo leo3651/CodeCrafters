@@ -9,8 +9,10 @@ export class KafkaPartitionLogFile {
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
+
     const data = fs.readFileSync(filePath);
     console.log(`Reading file: ${filePath} with size: ${data.length}`);
+
     return KafkaPartitionLogFile.fromBuffer(data);
   }
 
@@ -20,11 +22,10 @@ export class KafkaPartitionLogFile {
 
     while (currentOffset < buffer.length) {
       // Start reading first record batch
-
       const batch = KafkaClusterMetadataRecordBatch.fromBuffer(
         buffer.subarray(currentOffset)
       );
-      // console.log(`[KafkaPartitionRecordBatch] debug: ${batch.debugString()}`);
+
       currentOffset += batch.bufferSize();
       batches.push(batch);
     }

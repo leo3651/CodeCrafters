@@ -181,6 +181,7 @@ export class KafkaClusterMetadataRecordBatch {
         | KafkaClusterMetadataTopicRecord
         | KafkaClusterMetadataPartitionRecord
         | KafkaClusterMetadataFeatureLevelRecord
+        | Buffer
         | null = null;
 
       switch (recordType) {
@@ -194,6 +195,9 @@ export class KafkaClusterMetadataRecordBatch {
         case EMetadataRecordType.PARTITION:
           valueRecord =
             KafkaClusterMetadataPartitionRecord.fromBuffer(recordValue);
+          break;
+        case 101:
+          valueRecord = Buffer.from(recordValue);
           break;
         default:
           console.log(
@@ -260,7 +264,7 @@ export class KafkaClusterMetadataRecordBatch {
   }
 }
 
-class KafkaClusterMetadataRecordBatchItem {
+export class KafkaClusterMetadataRecordBatchItem {
   constructor(
     public length: number,
     public attributes: number,
@@ -272,6 +276,7 @@ class KafkaClusterMetadataRecordBatchItem {
       | KafkaClusterMetadataTopicRecord
       | KafkaClusterMetadataPartitionRecord
       | KafkaClusterMetadataFeatureLevelRecord
+      | Buffer
       | null,
     public headersLength: number
   ) {}
