@@ -1,117 +1,173 @@
 import * as net from "net";
-import * as zlib from "zlib";
 import fs from "fs";
-
-const OK = "HTTP/1.1 200 OK\r\n\r\n";
-const NOT_OK = "HTTP/1.1 404 Not Found\r\n\r\n";
-const ALLOWED_COMPRESSION_METHODS = ["gzip"];
-
-const args = process.argv;
+import * as zlib from "zlib";
 
 const server = net.createServer((socket) => {
   socket.on("data", (request) => {
-    console.log(request.toString());
-    const reqMethod = request.toString().split(" ")[0];
-    const requestTarget = request.toString().split(" ")[1];
-    const { headers, body } = createResponse(
-      request.toString(),
-      requestTarget,
-      reqMethod
-    );
-    socket.write(headers);
-    socket.write(body);
-    socket.end();
+    new HttpServerHandler(request, socket);
   });
 });
 
 server.listen(4221, "localhost");
 
-function createResponse(
-  request: string,
-  requestTarget: string,
-  reqMethod: string
-) {
-  if (requestTarget === "/") {
-    return { headers: OK, body: "" };
+export class HttpServerHandler {
+  private readonly OK = "HTTP/1.1 200 OK\r\n\r\n";
+  private readonly NOT_OK = "HTTP/1.1 404 Not Found\r\n\r\n";
+  private readonly ALLOWED_COMPRESSION_METHODS = ["gzip"];
+
+  private get requestMethod(): string {
+    return this.request.toString().split(" ")[0];
+  }
+  private get requestTarget(): string {
+    return this.request.toString().split(" ")[1];
   }
 
-  if (requestTarget.startsWith("/echo")) {
-    let stringToReturn = requestTarget.split("/").slice(2).join("/");
-    let body: Uint8Array | string = new Uint8Array(
-      Buffer.from(stringToReturn, "utf8")
+  constructor(private request: Buffer, socket: net.Socket) {
+    const response = this.createResponse();
+
+    console.log(response.toString());
+    socket.write(new Uint8Array(response));
+    // socket.end();
+  }
+
+  private createResponse(): Buffer {
+    // "/"
+    if (this.requestTarget === "/") {
+      return this.OkResponse();
+    }
+
+    // Echo
+    else if (this.requestTarget.startsWith("/echo")) {
+      return this.echoResponse();
+    }
+
+    // User agent
+    else if (this.requestTarget === "/user-agent") {
+      return this.userAgentResponse();
+    }
+
+    // Files
+    else if (this.requestTarget.startsWith("/files/")) {
+      return this.filesResponse();
+    }
+
+    // Not Found
+    else {
+      return Buffer.from(this.NOT_OK);
+    }
+  }
+
+  private OkResponse(): Buffer {
+    return Buffer.from(this.OK);
+  }
+
+  private userAgentResponse(): Buffer {
+    const userAgentData = Buffer.from(
+      this.request.toString().split("User-Agent: ")[1].split("\r\n")[0]
     );
-    const compressMethod = checkForCompressHeaders(request);
 
-    if (compressMethod === "gzip") {
-      body = new Uint8Array(zlib.gzipSync(body));
-    }
+    const headers = Buffer.from(
+      `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgentData.length}\r\n\r\n`
+    );
 
-    const headers = `HTTP/1.1 200 OK\r\n${
-      compressMethod ? addCompressHeaders(compressMethod) : ""
-    }Content-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n`;
-
-    return { headers, body };
+    return Buffer.concat([
+      new Uint8Array(headers),
+      new Uint8Array(userAgentData),
+    ]);
   }
 
-  if (requestTarget === "/user-agent") {
-    const userAgentData = request.split("User-Agent: ")[1].split("\r\n")[0];
-    const headers = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgentData.length}\r\n\r\n`;
-    return { headers, body: userAgentData };
-  }
+  private echoResponse(): Buffer {
+    const echoString = this.requestTarget.split("/").slice(2).join("/");
+    let responseBuffer = Buffer.from("HTTP/1.1 200 OK\r\n");
 
-  if (requestTarget.startsWith("/files/")) {
-    const absPath = process.argv[3];
-    const fileName = requestTarget.split("/")[2];
+    let body: Buffer = Buffer.from(echoString, "utf8");
 
-    if (reqMethod === "GET") {
-      try {
-        const fileContent = fs.readFileSync(`${absPath}/${fileName}`, "binary");
-        const headers = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n\r\n`;
-        return {
-          headers,
-          body: fileContent,
-        };
-      } catch (err) {
-        return { headers: NOT_OK, body: "" };
-      }
+    const compressMethodsArr = this.checkForCompressHeaders(this.request);
+
+    if (compressMethodsArr.includes("gzip")) {
+      body = zlib.gzipSync(new Uint8Array(body));
+      console.log("HERE");
+      responseBuffer = Buffer.concat([
+        new Uint8Array(responseBuffer),
+        new Uint8Array(Buffer.from(this.addCompressHeader("gzip"))),
+      ]);
     }
 
-    if (reqMethod === "POST") {
-      const bodySize: number = parseInt(
-        request.split("Content-Length: ")[1].split("\r\n")[0]
-      );
-      const reqBuffer = Buffer.from(request);
-      const content = reqBuffer.slice(reqBuffer.length - bodySize).toString();
-      try {
-        fs.writeFileSync(`${absPath}/${fileName}`, content);
-        return { headers: `HTTP/1.1 201 Created\r\n\r\n`, body: "" };
-      } catch (err) {
-        return { headers: NOT_OK, body: "" };
-      }
-    }
-  }
-
-  return { headers: NOT_OK, body: "" };
-}
-
-function checkForCompressHeaders(request: string) {
-  try {
-    const compressMethods = request
-      .split("Accept-Encoding: ")[1]
-      .split("\r\n")[0]
-      .split(",");
-    return (
-      ALLOWED_COMPRESSION_METHODS.find((method) =>
-        compressMethods.some(
-          (compressMethod) => compressMethod.trim() === method
+    responseBuffer = Buffer.concat([
+      new Uint8Array(responseBuffer),
+      new Uint8Array(
+        Buffer.from(
+          `Content-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n`
         )
-      ) || null
-    );
-  } catch (err) {
-    return null;
-  }
-}
+      ),
+      new Uint8Array(body),
+    ]);
 
-function addCompressHeaders(compressMethod: string) {
-  return `Content-Encoding: ${compressMethod}\r\n`;
+    return responseBuffer;
+  }
+
+  private filesResponse(): Buffer {
+    const absPath = process.argv[3];
+    const fileName = this.requestTarget.split("/")[2];
+
+    //GET
+    if (this.requestMethod === "GET") {
+      try {
+        const fileContent = fs.readFileSync(`${absPath}/${fileName}`);
+        const headers = Buffer.from(
+          `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n\r\n`
+        );
+
+        return Buffer.concat([
+          new Uint8Array(headers),
+          new Uint8Array(fileContent),
+        ]);
+      } catch (err) {
+        return Buffer.from(this.NOT_OK);
+      }
+    }
+
+    // POST
+    else if (this.requestMethod === "POST") {
+      const bodySize: number = parseInt(
+        this.request.toString().split("Content-Length: ")[1].split("\r\n")[0]
+      );
+
+      const content = this.request.subarray(this.request.length - bodySize);
+
+      try {
+        fs.writeFileSync(`${absPath}/${fileName}`, new Uint8Array(content));
+        return Buffer.from(`HTTP/1.1 201 Created\r\n\r\n`);
+      } catch (err) {
+        return Buffer.from(this.NOT_OK);
+      }
+    }
+
+    throw new Error("Unhandled method");
+  }
+
+  private checkForCompressHeaders(request: Buffer): string[] {
+    try {
+      const compressMethods = request
+        .toString()
+        .split("Accept-Encoding: ")[1]
+        .split("\r\n")[0]
+        .split(",");
+
+      return compressMethods
+        .filter((compressMethod) =>
+          this.ALLOWED_COMPRESSION_METHODS.some(
+            (allowedCompressMethod) =>
+              allowedCompressMethod === compressMethod.trim()
+          )
+        )
+        .map((method) => method.trim());
+    } catch (err) {
+      return [];
+    }
+  }
+
+  private addCompressHeader(compressMethod: string): string {
+    return `Content-Encoding: ${compressMethod}\r\n`;
+  }
 }
