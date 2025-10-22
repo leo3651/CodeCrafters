@@ -4,7 +4,13 @@ import { Tokenizer } from "./tokenizer";
 import fs from "fs";
 
 /*
-matchPattern("banana", "[^anb]");
+matchPattern("caaat", "ca*t");
+matchPattern("kabct", "k[abc]*t");
+matchPattern("kt", "k\\d*t");
+matchPattern(
+  "abc-def is abc-def, not xyz",
+  "'([abc]+)-([def]+) is \\1-\\2, not [^xyz]+'"
+);
 matchPattern("caaats", "ca+at");
 matchPattern("cat and dog", "(\\w+) and \\1");
 matchPattern(

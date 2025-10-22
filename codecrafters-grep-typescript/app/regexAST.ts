@@ -73,7 +73,11 @@ export class RegexASTHandler {
         ];
       } 
       
-      else if (token.endsWith("+") || token.endsWith("?")) {
+      else if (
+        token.endsWith("+") ||
+        token.endsWith("?") ||
+        token.endsWith("*")
+      ) {
         const quant = token[token.length - 1];
         const value = token.slice(0, -1);
 

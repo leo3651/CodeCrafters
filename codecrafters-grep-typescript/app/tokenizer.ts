@@ -1,5 +1,3 @@
-import { ALPHA, DIGITS } from "./constants";
-
 export class Tokenizer {
   public static tokenize(pattern: string): string[] {
     const tokens: string[] = [];
@@ -51,42 +49,14 @@ export class Tokenizer {
       } 
       
       else if (
-        (pattern[i] === "+" || pattern[i] === "?") &&
-        tokens.length > 0 &&
-        tokens[tokens.length - 1] === ")"
-      ) {
-        tokens.push(pattern[i]);
-        i++;
-      } 
-      
-      else if (
-        (pattern[i + 1] === "+" || pattern[i + 1] === "?") &&
+        (pattern[i + 1] === "+" ||
+          pattern[i + 1] === "?" ||
+          pattern[i + 1] === "*") &&
         pattern[i] !== ")" &&
         pattern[i] !== "."
       ) {
         tokens.push(pattern[i] + pattern[i + 1]);
         i += 2;
-      } 
-      
-      else if (
-        (ALPHA.includes(pattern[i]) ||
-          DIGITS.includes(pattern[i]) ||
-          pattern[i] === "_") &&
-        (pattern[i + 1] === "+" || pattern[i + 1] === "?")
-      ) {
-        tokens.push(pattern[i] + pattern[i + 1]);
-        i += 2;
-        continue;
-      } 
-      
-      else if (
-        ALPHA.includes(pattern[i]) ||
-        DIGITS.includes(pattern[i]) ||
-        pattern[i] === "_"
-      ) {
-        tokens.push(pattern[i]);
-        i++;
-        continue;
       } 
       
       else {

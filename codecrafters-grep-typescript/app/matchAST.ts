@@ -74,7 +74,7 @@ export class MatchAST {
         }
 
       case "Quantifier":
-        if (node.quant === "+") {
+        if (node.quant === "+" || node.quant === "*") {
           let posAndGroupsResult = this.match(node.child, i, groups, inputLine);
           let allPosAndGroupsArr = [...posAndGroupsResult];
 
@@ -94,6 +94,13 @@ export class MatchAST {
             });
 
             posAndGroupsResult = nextResults;
+          }
+
+          if (
+            node.quant === "*" &&
+            allPosAndGroupsArr.every(({ position }) => position === -1)
+          ) {
+            allPosAndGroupsArr = [{ position: ++i, groups }];
           }
 
           return allPosAndGroupsArr;
