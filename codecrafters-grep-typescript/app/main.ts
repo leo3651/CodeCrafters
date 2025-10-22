@@ -20,6 +20,11 @@ matchPattern(
 const args: string[] = process.argv;
 const pattern: string = args[3];
 const filePaths: string[] = args.slice(4);
+
+const dirPath = args[5];
+const recursiveDirSearch = args[2];
+const dirRecSearchPattern = args[4];
+
 const inputLine: string = await Bun.stdin.text();
 
 // console.log(args);
@@ -32,8 +37,22 @@ if (args[2] !== "-E" && args[2] !== "-r") {
   process.exit(1);
 }
 
-if (filePaths.length) {
-  const matchedLines: string[][] = getMatchedLinesFromFiles(filePaths, pattern);
+// Log all matching lines from given files or directory
+if ((dirPath && recursiveDirSearch === "-r") || filePaths.length) {
+  let matchedLines: string[][] = [];
+
+  // Directory
+  if (dirPath && recursiveDirSearch === "-r") {
+    matchedLines = getMatchedLinesFromDirectory(
+      dirPath.slice(0, -1),
+      dirRecSearchPattern
+    ).filter((arr) => arr.length);
+  }
+
+  // Files
+  else {
+    matchedLines = getMatchedLinesFromFiles(filePaths, pattern);
+  }
 
   if (matchedLines.length) {
     matchedLines.forEach((file) => {
@@ -43,7 +62,10 @@ if (filePaths.length) {
   } else {
     process.exit(1);
   }
-} else {
+}
+
+// Compare given pattern and input
+else {
   if (matchPattern(inputLine, pattern)) {
     console.log("Character is found. Exiting with 0...");
     process.exit(0);
@@ -69,11 +91,11 @@ function matchPattern(input: string, pattern: string) {
 }
 
 function getMatchedLinesFromFile(
-  path: string,
+  filePath: string,
   pattern: string,
   withFileName: boolean
 ) {
-  const fileContent: Buffer = fs.readFileSync(path);
+  const fileContent: Buffer = fs.readFileSync(filePath);
   let textContent: string = "";
   const matchedLines: string[] = [];
 
@@ -86,7 +108,7 @@ function getMatchedLinesFromFile(
   textContent.split("\n").forEach((line) => {
     if (matchPattern(line, pattern)) {
       if (withFileName) {
-        matchedLines.push(`${path}:${line}`);
+        matchedLines.push(`${filePath}:${line}`);
       } else {
         matchedLines.push(line);
       }
@@ -110,6 +132,27 @@ function getMatchedLinesFromFiles(
     );
     if (matchedLinesResults.length) {
       matchedLines.push(matchedLinesResults);
+    }
+  });
+
+  return matchedLines;
+}
+
+function getMatchedLinesFromDirectory(
+  path: string,
+  pattern: string
+): string[][] {
+  const matchedLines: string[][] = [];
+
+  fs.readdirSync(path, { withFileTypes: true }).forEach((dirSubPath) => {
+    if (dirSubPath.isFile()) {
+      matchedLines.push(
+        getMatchedLinesFromFile(`${path}/${dirSubPath.name}`, pattern, true)
+      );
+    } else if (dirSubPath.isDirectory()) {
+      matchedLines.push(
+        ...getMatchedLinesFromDirectory(`${path}/${dirSubPath.name}`, pattern)
+      );
     }
   });
 
