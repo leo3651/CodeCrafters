@@ -20,7 +20,7 @@ export class RegexASTHandler {
     let i: number = start;
 
     while (i < tokens.length) {
-      const token = tokens[i];
+      const token: string = tokens[i];
 
       if (token === "^") {
         elements.push({ type: "Anchor", kind: "start" });
@@ -57,13 +57,19 @@ export class RegexASTHandler {
       } 
       
       else if (token === "(") {
-        const [child, newIndex] = this.createRegexSAT(tokens, i + 1);
+        const [child, newIndex]: [RegexAST, number] = this.createRegexSAT(
+          tokens,
+          i + 1
+        );
         elements.push({ type: "Group", child, index: -999 });
         i = newIndex;
       } 
       
       else if (token === "|") {
-        const [right, newIndex] = this.createRegexSAT(tokens, i + 1);
+        const [right, newIndex]: [RegexAST, number] = this.createRegexSAT(
+          tokens,
+          i + 1
+        );
         return [
           {
             type: "Alternative",
@@ -76,20 +82,22 @@ export class RegexASTHandler {
       else if (
         token.endsWith("+") ||
         token.endsWith("?") ||
-        token.endsWith("*")
+        token.endsWith("*") ||
+        token.endsWith("}")
       ) {
-        const quant = token[token.length - 1];
-        const value = token.slice(0, -1);
+        let quant: string = "";
 
-        if (value) {
-          elements.push({
-            type: "Quantifier",
-            quant,
-            child: { type: "Literal", value },
-          });
-        } else if (elements.length) {
-          const previous = elements.pop()!;
+        if (token.endsWith("}")) {
+          quant = token.slice(token.indexOf("{"), token.indexOf("}") + 1);
+        } else {
+          quant = token[token.length - 1];
+        }
+
+        if (elements.length) {
+          const previous: RegexAST = elements.pop()!;
           elements.push({ type: "Quantifier", quant, child: previous });
+        } else {
+          throw new Error("Error creating SAT tree");
         }
 
         i++;
@@ -103,15 +111,15 @@ export class RegexASTHandler {
           .split("")
           .every((ch) => "0123456789".includes(ch))
       ) {
-        const index = parseInt(token.slice(1));
+        const index: number = parseInt(token.slice(1));
         elements.push({ type: "BackReference", index });
 
         i++;
       } 
       
       else if (token.startsWith("[") && token.endsWith("]")) {
-        const negated = token[1] === "^";
-        const chars = negated ? token.slice(2, -1) : token.slice(1, -1);
+        const negated: boolean = token[1] === "^";
+        const chars: string = negated ? token.slice(2, -1) : token.slice(1, -1);
         elements.push({ type: "CharClass", chars, negated });
 
         i++;

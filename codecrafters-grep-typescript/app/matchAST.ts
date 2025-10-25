@@ -1,6 +1,11 @@
 import { DIGITS, ALPHA } from "./constants.js";
 import type { RegexAST } from "./regexAST.js";
 
+type Position = {
+  position: number;
+  groups: string[];
+}[];
+
 export class MatchAST {
   private static groupIndex = 0;
 
@@ -30,7 +35,7 @@ export class MatchAST {
     this.groupIndex = 0;
     this.assignGroupIndices(node);
 
-    const posAndGroupsArr = this.match(node, i, [], inputLine);
+    const posAndGroupsArr: Position = this.match(node, i, [], inputLine);
 
     return posAndGroupsArr.some(({ position }) => position > -1);
   }
@@ -43,13 +48,10 @@ export class MatchAST {
   ): { position: number; groups: string[] }[] {
     switch (node.type) {
       case "Sequence": {
-        let posAndGroupsArr = [{ position: i, groups }];
+        let posAndGroupsArr: Position = [{ position: i, groups }];
 
         for (const el of node.elements) {
-          const nextPosAndGroupsArr: {
-            position: number;
-            groups: string[];
-          }[] = [];
+          const nextPosAndGroupsArr: Position = [];
 
           for (const { position: p, groups: g } of posAndGroupsArr) {
             if (p > -1) {
@@ -71,51 +73,6 @@ export class MatchAST {
           return [{ groups, position: ++i }];
         } else {
           return [{ position: -1, groups }];
-        }
-
-      case "Quantifier":
-        if (node.quant === "+" || node.quant === "*") {
-          let posAndGroupsResult = this.match(node.child, i, groups, inputLine);
-          let allPosAndGroupsArr = [...posAndGroupsResult];
-
-          while (true) {
-            if (!posAndGroupsResult.some(({ position }) => position > -1)) {
-              break;
-            }
-
-            let nextResults: { position: number; groups: string[] }[] = [];
-            posAndGroupsResult.forEach(({ position, groups }) => {
-              if (position > -1) {
-                nextResults.push(
-                  ...this.match(node.child, position, groups, inputLine)
-                );
-                allPosAndGroupsArr.push(...nextResults);
-              }
-            });
-
-            posAndGroupsResult = nextResults;
-          }
-
-          if (
-            node.quant === "*" &&
-            allPosAndGroupsArr.every(({ position }) => position === -1)
-          ) {
-            allPosAndGroupsArr = [{ position: ++i, groups }];
-          }
-
-          return allPosAndGroupsArr;
-        } else {
-          const posAndGroupsArr = this.match(node.child, i, groups, inputLine);
-
-          return posAndGroupsArr.map(
-            ({ position: newPos, groups: newGroups }) => {
-              if (newPos > -1) {
-                return { position: newPos, groups: newGroups };
-              } else {
-                return { position: i, groups };
-              }
-            }
-          );
         }
 
       case "Digit":
@@ -143,22 +100,8 @@ export class MatchAST {
           return [{ position: -1, groups }];
         }
 
-      case "Group":
-        const posAndGroupsArr = this.match(node.child, i, groups, inputLine);
-
-        return posAndGroupsArr.map(
-          ({ position: groupEndIndex, groups: newGroups }) => {
-            if (groupEndIndex > -1) {
-              newGroups[node.index] = inputLine.slice(i, groupEndIndex);
-              return { position: groupEndIndex, groups: newGroups };
-            } else {
-              return { position: -1, groups };
-            }
-          }
-        );
-
       case "BackReference":
-        const backRef = groups[node.index] || "";
+        const backRef: string = groups[node.index] || "";
         if (backRef && inputLine.startsWith(backRef, i)) {
           return [{ position: i + backRef.length, groups }];
         } else {
@@ -166,7 +109,7 @@ export class MatchAST {
         }
 
       case "CharClass":
-        const match = node.negated
+        const match: boolean = node.negated
           ? !node.chars.includes(inputLine[i])
           : node.chars.includes(inputLine[i]);
 
@@ -188,8 +131,183 @@ export class MatchAST {
           this.match(node, i, groups, inputLine)
         );
 
+      case "Quantifier":
+        if (
+          node.quant === "+" ||
+          node.quant === "*" ||
+          node.quant.startsWith("{")
+        ) {
+          let [allPosAndGroupsArr, matchedTimesNum]: [Position, number] =
+            this.matchNTimes(node.child, groups, inputLine, i);
+
+          // '*'
+          if (
+            node.quant === "*" &&
+            allPosAndGroupsArr.every(({ position }) => position === -1)
+          ) {
+            return (allPosAndGroupsArr = [{ position: ++i, groups }]);
+          }
+
+          // '{}'
+          else if (node.quant.startsWith("{")) {
+            const {
+              min,
+              max,
+              exactlyNTimes,
+            }: {
+              min: number;
+              max: number;
+              exactlyNTimes: number;
+            } = this.parseQuant(node.quant);
+            if (
+              this.matchedTimesNumEligible(
+                matchedTimesNum,
+                min,
+                max,
+                exactlyNTimes
+              )
+            ) {
+              return allPosAndGroupsArr;
+            } else {
+              return (allPosAndGroupsArr = [{ position: -1, groups }]);
+            }
+          }
+
+          // '+'
+          else {
+            return allPosAndGroupsArr;
+          }
+        }
+
+        // '?'
+        else {
+          const posAndGroupsArr: Position = this.match(
+            node.child,
+            i,
+            groups,
+            inputLine
+          );
+
+          return posAndGroupsArr.map(
+            ({ position: newPos, groups: newGroups }) => {
+              if (newPos > -1) {
+                return { position: newPos, groups: newGroups };
+              } else {
+                return { position: i, groups };
+              }
+            }
+          );
+        }
+
+      case "Group":
+        const posAndGroupsArr: Position = this.match(
+          node.child,
+          i,
+          groups,
+          inputLine
+        );
+
+        return posAndGroupsArr.map(
+          ({ position: groupEndIndex, groups: newGroups }) => {
+            if (groupEndIndex > -1) {
+              newGroups[node.index] = inputLine.slice(i, groupEndIndex);
+              return { position: groupEndIndex, groups: newGroups };
+            } else {
+              return { position: -1, groups };
+            }
+          }
+        );
+
       default:
         throw new Error("Unhandled exception");
+    }
+  }
+
+  private static matchNTimes(
+    node: RegexAST,
+    groups: string[],
+    inputLine: string,
+    i: number
+  ): [Position, number] {
+    let matchedTimesNum: number = 0;
+    let posAndGroupsResult: Position = this.match(node, i, groups, inputLine);
+    let allPosAndGroupsArr: Position = [...posAndGroupsResult];
+
+    while (true) {
+      if (!posAndGroupsResult.some(({ position }) => position > -1)) {
+        break;
+      }
+      matchedTimesNum++;
+
+      let nextResults: Position = [];
+      posAndGroupsResult.forEach(({ position, groups }) => {
+        if (position > -1) {
+          nextResults.push(...this.match(node, position, groups, inputLine));
+          allPosAndGroupsArr.push(...nextResults);
+        }
+      });
+
+      posAndGroupsResult = nextResults;
+    }
+
+    return [allPosAndGroupsArr, matchedTimesNum];
+  }
+
+  private static parseQuant(quant: string): {
+    min: number;
+    max: number;
+    exactlyNTimes: number;
+  } {
+    if (!quant.startsWith("{") && !quant.endsWith("}")) {
+      throw new Error("Invalid quant");
+    }
+
+    let min: number = -999;
+    let max: number = -999;
+    let exactlyNTimes: number = -999;
+
+    if (quant.includes(",")) {
+      [min, max] = quant
+        .slice(1, -1)
+        .split(",")
+        .filter((val) => !!val)
+        .map((val) => Number.parseInt(val));
+    } else {
+      exactlyNTimes = Number.parseInt(quant.slice(1, -1));
+    }
+
+    return { min, max, exactlyNTimes };
+  }
+
+  private static matchedTimesNumEligible(
+    matchedTimesNum: number,
+    min: number,
+    max: number,
+    exactlyNTimes: number
+  ): boolean {
+    // {n}
+    if (exactlyNTimes > 0 && matchedTimesNum === exactlyNTimes) {
+      return true;
+    }
+
+    // {n, m}
+    else if (
+      min > 0 &&
+      max > 0 &&
+      matchedTimesNum >= min &&
+      matchedTimesNum <= max
+    ) {
+      return true;
+    }
+
+    // {n,}
+    else if (min > 0 && matchedTimesNum >= min) {
+      return true;
+    }
+
+    // no match
+    else {
+      return false;
     }
   }
 }

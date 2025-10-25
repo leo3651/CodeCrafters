@@ -4,8 +4,8 @@ export class Tokenizer {
     let i: number = 0;
 
     // Anchors
-    const hasAnchorStart = pattern[0] === "^";
-    const hasAnchorEnd = pattern[-1] === "$";
+    const hasAnchorStart:boolean = pattern[0] === "^";
+    const hasAnchorEnd:boolean = pattern[-1] === "$";
 
     if (hasAnchorStart) {
       tokens.push("^");
@@ -46,17 +46,19 @@ export class Tokenizer {
       else if (pattern[i] === ".") {
         tokens.push("WILDCARD");
         i++;
-      } 
-      
-      else if (
-        (pattern[i + 1] === "+" ||
-          pattern[i + 1] === "?" ||
-          pattern[i + 1] === "*") &&
-        pattern[i] !== ")" &&
-        pattern[i] !== "."
-      ) {
-        tokens.push(pattern[i] + pattern[i + 1]);
-        i += 2;
+      } else if (pattern[i] === "{") {
+        let j:number = i + 1;
+        while (j < pattern.length && pattern[j] !== "}") {
+          j++;
+        }
+
+        if (j < pattern.length) {
+          tokens.push(pattern.slice(i, j + 1));
+        } else {
+          throw new Error("No closing '}'");
+        }
+
+        i = j + 1;
       } 
       
       else {

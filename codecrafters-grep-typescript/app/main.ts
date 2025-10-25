@@ -4,6 +4,9 @@ import { Tokenizer } from "./tokenizer";
 import fs from "fs";
 
 /*
+matchPattern("pzzzq", "p[xyz]{2,3}q");
+matchPattern("n123m", "n\\d{1,3}m");
+matchPattern("caaaaat", "ca{2,4}t");
 matchPattern("caaat", "ca*t");
 matchPattern("kabct", "k[abc]*t");
 matchPattern("kt", "k\\d*t");
@@ -27,9 +30,9 @@ const args: string[] = process.argv;
 const pattern: string = args[3];
 const filePaths: string[] = args.slice(4);
 
-const dirPath = args[5];
-const recursiveDirSearch = args[2];
-const dirRecSearchPattern = args[4];
+const dirPath: string = args[5];
+const recursiveDirSearch: string = args[2];
+const dirRecSearchPattern: string = args[4];
 
 const inputLine: string = await Bun.stdin.text();
 
@@ -131,7 +134,7 @@ function getMatchedLinesFromFiles(
   const matchedLines: string[][] = [];
 
   filePaths.forEach((filePath) => {
-    const matchedLinesResults = getMatchedLinesFromFile(
+    const matchedLinesResults: string[] = getMatchedLinesFromFile(
       filePath,
       pattern,
       filePaths.length > 1
@@ -151,11 +154,15 @@ function getMatchedLinesFromDirectory(
   const matchedLines: string[][] = [];
 
   fs.readdirSync(path, { withFileTypes: true }).forEach((dirSubPath) => {
+    // File
     if (dirSubPath.isFile()) {
       matchedLines.push(
         getMatchedLinesFromFile(`${path}/${dirSubPath.name}`, pattern, true)
       );
-    } else if (dirSubPath.isDirectory()) {
+    }
+
+    // Dir
+    else if (dirSubPath.isDirectory()) {
       matchedLines.push(
         ...getMatchedLinesFromDirectory(`${path}/${dirSubPath.name}`, pattern)
       );
