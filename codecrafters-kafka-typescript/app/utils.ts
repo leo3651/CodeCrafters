@@ -1,3 +1,148 @@
+import { EByteSize, type Variant } from "./model";
+
+export function readVariant(data: Buffer, zigzag: boolean): Variant {
+  let value: number = 0;
+  let shift: number = 0;
+  let offset: number = 0;
+
+  while (true) {
+    value |= (0b01111111 & data[offset]) << shift;
+
+    if ((data[offset] & 0b10000000) === 0) {
+      break;
+    }
+
+    shift += 7;
+    offset++;
+  }
+
+  offset++;
+
+  return {
+    value: zigzag ? (value >> 1) ^ -(value & 1) : value,
+    length: offset,
+  };
+}
+
+export function writeUnsignedVariant(value: number, zigzag: boolean): Buffer {
+  if (zigzag) {
+    value = (value << 1) ^ (value >> 31);
+  }
+
+  const chunks: number[] = [];
+
+  while (true) {
+    const byte = value & 0b01111111;
+    value >>>= 7;
+
+    if (value === 0) {
+      chunks.push(byte);
+      break;
+    }
+
+    chunks.push(byte | 0b10000000);
+  }
+
+  return Buffer.from(chunks);
+}
+
+export function crc32c(buffer: Buffer, initial: number = 0) {
+  if (!Buffer.isBuffer(buffer)) {
+    buffer = Buffer.from(buffer);
+  }
+  let crc = (initial | 0) ^ -1;
+  for (let i = 0; i < buffer.length; i++) {
+    crc = kCRCTable[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ -1) >>> 0;
+}
+
+export function buildBuffer(
+  bytesToWrite: EByteSize,
+  value: number | bigint
+): Buffer {
+  let buffer = Buffer.alloc(0);
+
+  switch (bytesToWrite) {
+    // 1 BYTE
+    case EByteSize.writeUInt8:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(1);
+      buffer.writeUInt8(value);
+      break;
+    case EByteSize.writeInt8:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(1);
+      buffer.writeInt8(value);
+      break;
+
+    // 2 BYTES
+    case EByteSize.writeUInt16BE:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(2);
+      buffer.writeUInt16BE(value);
+      break;
+    case EByteSize.writeInt16BE:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(2);
+      buffer.writeInt16BE(value);
+      break;
+
+    // 4 BYTES
+    case EByteSize.writeUInt32BE:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(4);
+      buffer.writeUInt32BE(value);
+      break;
+    case EByteSize.writeInt32BE:
+      if (typeof value !== "number") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(4);
+      buffer.writeInt32BE(value);
+      break;
+
+    // 8 BYTES
+    case EByteSize.writeBigUInt64BE:
+      if (typeof value !== "bigint") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(8);
+      buffer.writeBigUInt64BE(value);
+      break;
+    case EByteSize.writeBigInt64BE:
+      if (typeof value !== "bigint") {
+        throw new Error("Expected number");
+      }
+
+      buffer = Buffer.alloc(8);
+      buffer.writeBigInt64BE(value);
+      break;
+
+    default:
+      throw new Error("Unsupported");
+  }
+
+  return buffer;
+}
+
 const kCRCTable = Int32Array.of(
   0x00000000,
   0xf26b8303,
@@ -256,60 +401,3 @@ const kCRCTable = Int32Array.of(
   0x5f16d052,
   0xad7d5351
 );
-
-export function readVariant(
-  data: Buffer,
-  zigzag: boolean
-): { value: number; length: number } {
-  let value: number = 0;
-  let shift: number = 0;
-  let offset: number = 0;
-
-  while (true) {
-    value |= (0b01111111 & data[offset]) << shift;
-
-    if ((data[offset] & 0b10000000) === 0) {
-      break;
-    }
-
-    shift += 7;
-    offset++;
-  }
-
-  offset++;
-
-  return { value: zigzag ? value / 2 : value, length: offset };
-}
-
-export function writeUnsignedVariant(value: number, zigzag: boolean): Buffer {
-  if (zigzag) {
-    value = value * 2;
-  }
-
-  const chunks: number[] = [];
-
-  while (true) {
-    const byte = value & 0b01111111;
-    value >>>= 7;
-
-    if (value === 0) {
-      chunks.push(byte);
-      break;
-    }
-
-    chunks.push(byte | 0b10000000);
-  }
-
-  return Buffer.from(chunks);
-}
-
-export function crc32c(buffer: Buffer, initial: number = 0) {
-  if (!Buffer.isBuffer(buffer)) {
-    buffer = Buffer.from(buffer);
-  }
-  let crc = (initial | 0) ^ -1;
-  for (let i = 0; i < buffer.length; i++) {
-    crc = kCRCTable[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ -1) >>> 0;
-}

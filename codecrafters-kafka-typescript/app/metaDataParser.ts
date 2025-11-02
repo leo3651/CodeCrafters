@@ -1,9 +1,9 @@
-import { EMetadataRecordType } from "./model";
+import { EMetadataRecordType, type RecordHeader, type Variant } from "./model";
 import fs from "fs";
 import { readVariant } from "./utils";
 
 export class KafkaClusterMetadataLogFile {
-  constructor(public batches: KafkaClusterMetadataRecordBatch[]) {}
+  constructor(public batches: KafkaRecordBatch[]) {}
 
   public static fromFile(filePath: string): KafkaClusterMetadataLogFile {
     // Handle file not found error
@@ -11,67 +11,61 @@ export class KafkaClusterMetadataLogFile {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    const data = fs.readFileSync(filePath);
+    const data: Buffer = fs.readFileSync(filePath);
     console.log(`Reading file: ${filePath} with size: ${data.length}`);
 
     return KafkaClusterMetadataLogFile.fromBuffer(data);
   }
 
   public static fromBuffer(buffer: Buffer): KafkaClusterMetadataLogFile {
-    let currentOffset = 0;
-    const batches: KafkaClusterMetadataRecordBatch[] = [];
+    let currentOffset: number = 0;
+    const recordBatches: KafkaRecordBatch[] = [];
 
     while (currentOffset < buffer.length) {
       // Start reading first record batch
-      const batch = KafkaClusterMetadataRecordBatch.fromBuffer(
+      const recordBatch: KafkaRecordBatch = KafkaRecordBatch.fromBuffer(
         buffer.subarray(currentOffset)
       );
 
-      currentOffset += batch.bufferSize();
-      batches.push(batch);
+      currentOffset += recordBatch.bufferSize();
+      recordBatches.push(recordBatch);
     }
 
-    const logFile = new KafkaClusterMetadataLogFile(batches);
+    const logFile: KafkaClusterMetadataLogFile =
+      new KafkaClusterMetadataLogFile(recordBatches);
 
     return logFile;
   }
 
-  getTopicRecords(): KafkaClusterMetadataTopicRecord[] {
-    const topicRecords = this.batches
-      .map((batch) => batch.getTopicRecord())
-      .filter(
-        (record) => record !== null && record !== undefined
-      ) as KafkaClusterMetadataTopicRecord[];
+  public getTopics(): KafkaTopic[] {
+    const topics: KafkaTopic[] = this.batches
+      .map((batch: KafkaRecordBatch) => batch.getTopic())
+      .filter((record: KafkaTopic) => record !== null && record !== undefined);
 
-    return topicRecords;
+    return topics;
   }
 
-  getMatchTopicRecord(
-    topicUUID: Buffer
-  ): KafkaClusterMetadataTopicRecord | undefined {
-    const topicRecords = this.getTopicRecords();
-    const topicRecord = topicRecords.find((record) =>
+  public getMatchTopic(topicUUID: Buffer): KafkaTopic | undefined {
+    const topics: KafkaTopic[] = this.getTopics();
+
+    const topic: KafkaTopic | undefined = topics.find((record) =>
       record.uuid.equals(topicUUID)
     );
 
-    return topicRecord;
+    return topic;
   }
 
-  getPartitionRecordsMatchTopicUuid(
-    topicUuid: Buffer
-  ): KafkaClusterMetadataPartitionRecord[] {
-    const partitionRecords = this.batches
-      .map((batch) => batch.getPartitionRecords())
+  public getPartitionsMatchTopicUuid(topicUuid: Buffer): KafkaPartition[] {
+    const partitions: KafkaPartition[] = this.batches
+      .map((batch: KafkaRecordBatch) => batch.getPartitions())
       .flat()
-      .filter((record) =>
-        record.topicUuid.equals(topicUuid)
-      ) as KafkaClusterMetadataPartitionRecord[];
+      .filter((record: KafkaPartition) => record.topicUuid.equals(topicUuid));
 
-    return partitionRecords;
+    return partitions;
   }
 }
 
-export class KafkaClusterMetadataRecordBatch {
+export class KafkaRecordBatch {
   constructor(
     public baseOffset: bigint,
     public batchLength: number,
@@ -86,7 +80,7 @@ export class KafkaClusterMetadataRecordBatch {
     public producerEpoch: number,
     public baseSequence: number,
     public recordCount: number,
-    public recordBatchItems: KafkaClusterMetadataRecordBatchItem[]
+    public records: KafkaRecord[]
   ) {}
 
   public bufferSize(): number {
@@ -97,135 +91,162 @@ export class KafkaClusterMetadataRecordBatch {
     );
   }
 
-  public static fromBuffer(buffer: Buffer): KafkaClusterMetadataRecordBatch {
-    let currentOffset = 0;
+  public static fromBuffer(buffer: Buffer): KafkaRecordBatch {
+    let currentOffset: number = 0;
 
-    const baseOffset = buffer.readBigInt64BE(currentOffset);
+    const baseOffset: bigint = buffer.readBigInt64BE(currentOffset);
     currentOffset += 8;
 
-    const batchLength = buffer.readInt32BE(currentOffset);
+    const batchLength: number = buffer.readInt32BE(currentOffset);
     currentOffset += 4;
 
-    const partitionLeaderEpoch = buffer.readInt32BE(currentOffset);
+    const partitionLeaderEpoch: number = buffer.readInt32BE(currentOffset);
     currentOffset += 4;
 
-    const magicByte = buffer.readInt8(currentOffset);
+    const magicByte: number = buffer.readInt8(currentOffset);
     currentOffset += 1;
 
-    const crc = buffer.readUInt32BE(currentOffset);
+    const crc: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
-    const attributes = buffer.readInt16BE(currentOffset);
+    const attributes: number = buffer.readInt16BE(currentOffset);
     currentOffset += 2;
 
-    const lastOffsetDelta = buffer.readInt32BE(currentOffset);
+    const lastOffsetDelta: number = buffer.readInt32BE(currentOffset);
     currentOffset += 4;
 
-    const baseTimestamp = buffer.readBigInt64BE(currentOffset);
+    const baseTimestamp: bigint = buffer.readBigInt64BE(currentOffset);
     currentOffset += 8;
 
-    const maxTimestamp = buffer.readBigInt64BE(currentOffset);
+    const maxTimestamp: bigint = buffer.readBigInt64BE(currentOffset);
     currentOffset += 8;
 
-    const producerId = buffer.readBigInt64BE(currentOffset);
+    const producerId: bigint = buffer.readBigInt64BE(currentOffset);
     currentOffset += 8;
 
-    const producerEpoch = buffer.readInt16BE(currentOffset);
+    const producerEpoch: number = buffer.readInt16BE(currentOffset);
     currentOffset += 2;
 
-    const baseSequence = buffer.readInt32BE(currentOffset);
+    const baseSequence: number = buffer.readInt32BE(currentOffset);
     currentOffset += 4;
 
-    const recordCount = buffer.readUInt32BE(currentOffset);
+    const recordCount: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
     // Read the record batch items
-    const recordBatchItems: KafkaClusterMetadataRecordBatchItem[] = [];
+    const records: KafkaRecord[] = [];
 
     for (let i = 0; i < recordCount; i++) {
-      const { value: recordLength, length: recordLengthSize } = readVariant(
-        buffer.subarray(currentOffset),
-        true
-      );
+      const { value: recordLength, length: recordLengthSize }: Variant =
+        readVariant(buffer.subarray(currentOffset), true);
       currentOffset += recordLengthSize;
 
-      const attributes = buffer.readUInt8(currentOffset);
+      const attributes: number = buffer.readUInt8(currentOffset);
       currentOffset += 1;
 
-      const timestampDelta = buffer.readInt8(currentOffset);
+      const timestampDelta: number = buffer.readInt8(currentOffset);
       currentOffset += 1;
 
-      const offsetDelta = buffer.readInt8(currentOffset);
+      const offsetDelta: number = buffer.readInt8(currentOffset);
       currentOffset += 1;
 
-      const { value: keyLength, length: keyLengthSize } = readVariant(
+      const { value: keyLength, length: keyLengthSize }: Variant = readVariant(
         buffer.subarray(currentOffset),
         true
       );
       currentOffset += keyLengthSize;
 
-      const { value: valueLength, length: valueLengthSize } = readVariant(
-        buffer.subarray(currentOffset),
-        true
-      );
-      currentOffset += valueLengthSize;
+      let keyValue: Buffer | null = null;
+      if (keyLength !== -1) {
+        keyValue = buffer.subarray(currentOffset, currentOffset + keyLength);
+        currentOffset += keyLength;
+      }
 
-      const recordValue = buffer.subarray(
+      const {
+        value: recordValueLength,
+        length: recordValueLengthSize,
+      }: Variant = readVariant(buffer.subarray(currentOffset), true);
+      currentOffset += recordValueLengthSize;
+
+      const recordValue: Buffer = buffer.subarray(
         currentOffset,
-        currentOffset + valueLength
+        currentOffset + recordValueLength
       );
 
-      const recordType = recordValue.readInt8(1);
+      const recordType: number = recordValue.readInt8(1);
 
       let valueRecord:
-        | KafkaClusterMetadataTopicRecord
-        | KafkaClusterMetadataPartitionRecord
-        | KafkaClusterMetadataFeatureLevelRecord
+        | KafkaTopic
+        | KafkaPartition
+        | KafkaFeatureLevel
         | Buffer
         | null = null;
 
       switch (recordType) {
         case EMetadataRecordType.FEATURE_LEVEL:
-          valueRecord =
-            KafkaClusterMetadataFeatureLevelRecord.fromBuffer(recordValue);
+          valueRecord = KafkaFeatureLevel.fromBuffer(recordValue);
           break;
         case EMetadataRecordType.TOPIC:
-          valueRecord = KafkaClusterMetadataTopicRecord.fromBuffer(recordValue);
+          valueRecord = KafkaTopic.fromBuffer(recordValue);
           break;
         case EMetadataRecordType.PARTITION:
-          valueRecord =
-            KafkaClusterMetadataPartitionRecord.fromBuffer(recordValue);
-          break;
-        case 101:
-          valueRecord = Buffer.from(recordValue);
+          valueRecord = KafkaPartition.fromBuffer(recordValue);
           break;
         default:
-          console.log(
-            `Record ${i}: Unknown record type: ${recordType}, skipping`
-          );
+          valueRecord = Buffer.from(recordValue);
+          console.log(`Record ${i}: UNKNOWN record type: ${recordType}`);
           break;
       }
 
-      currentOffset += valueLength;
+      currentOffset += recordValueLength;
 
-      const headersLength = buffer.readUInt8(currentOffset);
-      currentOffset += 1; // Skip headers
+      const { value: headersLength, length: headerLengthBufSize }: Variant =
+        readVariant(buffer.subarray(currentOffset), true);
+      currentOffset += headerLengthBufSize;
 
-      recordBatchItems.push(
-        new KafkaClusterMetadataRecordBatchItem(
+      const headers: RecordHeader[] = [];
+      for (let i = 0; i < headersLength; i++) {
+        const { value: hKeyLen, length: hKeyBufSize }: Variant = readVariant(
+          buffer.subarray(currentOffset),
+          true
+        );
+        currentOffset += hKeyBufSize;
+        let hKey: Buffer | null = null;
+        if (hKeyLen > 0) {
+          hKey = buffer.subarray(currentOffset + hKeyLen);
+          currentOffset += hKeyLen;
+        }
+
+        const { value: hKeyValLen, length: hKeyValBufSize }: Variant =
+          readVariant(buffer.subarray(currentOffset), true);
+        currentOffset += hKeyValBufSize;
+        let hKeyVal: Buffer | null = null;
+        if (hKeyValLen > 0) {
+          hKeyVal = buffer.subarray(currentOffset, currentOffset + hKeyValLen);
+          currentOffset += hKeyValLen;
+        }
+
+        const header: RecordHeader = { hKeyLen, hKey, hKeyValLen, hKeyVal };
+        headers.push(header);
+      }
+
+      records.push(
+        new KafkaRecord(
           recordLength,
           attributes,
           timestampDelta,
           offsetDelta,
           keyLength,
-          valueLength,
+          keyValue,
+          recordValueLength,
           valueRecord,
-          headersLength
+          headersLength,
+          headers
         )
       );
     }
 
-    const recordBatch = new KafkaClusterMetadataRecordBatch(
+    const recordBatch = new KafkaRecordBatch(
       baseOffset,
       batchLength,
       partitionLeaderEpoch,
@@ -239,50 +260,50 @@ export class KafkaClusterMetadataRecordBatch {
       producerEpoch,
       baseSequence,
       recordCount,
-      recordBatchItems
+      records
     );
 
     return recordBatch;
   }
 
-  public getTopicRecord(): KafkaClusterMetadataTopicRecord {
-    const topicRecord = this.recordBatchItems.find(
-      (item) => item.value instanceof KafkaClusterMetadataTopicRecord
-    )?.value as KafkaClusterMetadataTopicRecord;
+  public getTopic(): KafkaTopic {
+    const topic: KafkaTopic = this.records.find(
+      (item: KafkaRecord) => item.value instanceof KafkaTopic
+    )?.value as KafkaTopic;
 
-    return topicRecord;
+    return topic;
   }
 
-  public getPartitionRecords(): KafkaClusterMetadataPartitionRecord[] {
-    const partitionRecord = this.recordBatchItems
-      .filter(
-        (item) => item.value instanceof KafkaClusterMetadataPartitionRecord
-      )
-      .map((item) => item.value as KafkaClusterMetadataPartitionRecord);
+  public getPartitions(): KafkaPartition[] {
+    const partitions: KafkaPartition[] = this.records
+      .filter((item: KafkaRecord) => item.value instanceof KafkaPartition)
+      .map((item) => item.value as KafkaPartition);
 
-    return partitionRecord;
+    return partitions;
   }
 }
 
-export class KafkaClusterMetadataRecordBatchItem {
+export class KafkaRecord {
   constructor(
     public length: number,
     public attributes: number,
     public timestampDelta: number,
     public offsetDelta: number,
     public keyLength: number,
+    public keyValue: Buffer | null,
     public valueLength: number,
     public value:
-      | KafkaClusterMetadataTopicRecord
-      | KafkaClusterMetadataPartitionRecord
-      | KafkaClusterMetadataFeatureLevelRecord
+      | KafkaTopic
+      | KafkaPartition
+      | KafkaFeatureLevel
       | Buffer
       | null,
-    public headersLength: number
+    public headersLength: number,
+    public headers: RecordHeader[]
   ) {}
 }
 
-class KafkaClusterMetadataFeatureLevelRecord {
+class KafkaFeatureLevel {
   constructor(
     public frameVersion: number,
     public type: number,
@@ -293,35 +314,33 @@ class KafkaClusterMetadataFeatureLevelRecord {
     public tagFieldsCount: number
   ) {}
 
-  public static fromBuffer(
-    buffer: Buffer
-  ): KafkaClusterMetadataFeatureLevelRecord {
-    let currentOffset = 0;
+  public static fromBuffer(buffer: Buffer): KafkaFeatureLevel {
+    let currentOffset: number = 0;
 
-    const frameVersion = buffer.readUInt8(currentOffset);
+    const frameVersion: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const type = buffer.readUInt8(currentOffset);
+    const type: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const version = buffer.readUInt8(currentOffset);
+    const version: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const nameLength = buffer.readUInt8(currentOffset) - 1;
+    const nameLength: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
 
-    const name = buffer
+    const name: string = buffer
       .subarray(currentOffset, currentOffset + nameLength)
       .toString("utf-8");
     currentOffset += nameLength;
 
-    const featureLevel = buffer.readUInt16BE(currentOffset);
+    const featureLevel: number = buffer.readUInt16BE(currentOffset);
     currentOffset += 2;
 
-    const tagFieldsCount = buffer.readUInt8(currentOffset);
+    const tagFieldsCount: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    return new KafkaClusterMetadataFeatureLevelRecord(
+    return new KafkaFeatureLevel(
       frameVersion,
       type,
       version,
@@ -333,7 +352,7 @@ class KafkaClusterMetadataFeatureLevelRecord {
   }
 }
 
-export class KafkaClusterMetadataTopicRecord {
+export class KafkaTopic {
   constructor(
     public frameVersion: number,
     public type: number,
@@ -344,33 +363,33 @@ export class KafkaClusterMetadataTopicRecord {
     public tagFieldsCount: number
   ) {}
 
-  public static fromBuffer(buffer: Buffer): KafkaClusterMetadataTopicRecord {
-    let currentOffset = 0;
+  public static fromBuffer(buffer: Buffer): KafkaTopic {
+    let currentOffset: number = 0;
 
-    const frameVersion = buffer.readUInt8(currentOffset);
+    const frameVersion: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const type = buffer.readUInt8(currentOffset);
+    const type: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const version = buffer.readUInt8(currentOffset);
+    const version: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const nameLength = buffer.readUInt8(currentOffset) - 1;
+    const nameLength: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
 
-    const name = buffer
+    const name: string = buffer
       .subarray(currentOffset, currentOffset + nameLength)
       .toString("utf-8");
     currentOffset += nameLength;
 
-    const uuid = buffer.subarray(currentOffset, currentOffset + 16);
+    const uuid: Buffer = buffer.subarray(currentOffset, currentOffset + 16);
     currentOffset += 16;
 
-    const tagFieldsCount = buffer.readUInt8(currentOffset);
+    const tagFieldsCount: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    return new KafkaClusterMetadataTopicRecord(
+    return new KafkaTopic(
       frameVersion,
       type,
       version,
@@ -382,7 +401,7 @@ export class KafkaClusterMetadataTopicRecord {
   }
 }
 
-export class KafkaClusterMetadataPartitionRecord {
+export class KafkaPartition {
   constructor(
     public frameVersion: number,
     public type: number,
@@ -405,85 +424,87 @@ export class KafkaClusterMetadataPartitionRecord {
     public tagFieldsCount: number
   ) {}
 
-  public static fromBuffer(
-    buffer: Buffer
-  ): KafkaClusterMetadataPartitionRecord {
-    let currentOffset = 0;
+  public static fromBuffer(buffer: Buffer): KafkaPartition {
+    let currentOffset: number = 0;
 
-    const frameVersion = buffer.readUInt8(currentOffset);
+    const frameVersion: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const type = buffer.readUInt8(currentOffset);
+    const type: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const version = buffer.readUInt8(currentOffset);
+    const version: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    const partitionId = buffer.readUInt32BE(currentOffset);
+    const partitionId: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
-    const topicUuid = buffer.subarray(currentOffset, currentOffset + 16);
+    const topicUuid: Buffer = buffer.subarray(
+      currentOffset,
+      currentOffset + 16
+    );
     currentOffset += 16;
 
-    const lengthOfReplicas = buffer.readUInt8(currentOffset) - 1;
+    const lengthOfReplicas: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
-    const replicas = [];
+    const replicas: number[] = [];
     for (let i = 0; i < lengthOfReplicas; i++) {
-      const replicaId = buffer.readUInt32BE(currentOffset);
+      const replicaId: number = buffer.readUInt32BE(currentOffset);
       replicas.push(replicaId);
       currentOffset += 4;
     }
 
     currentOffset += lengthOfReplicas * 4;
 
-    const lengthOfIsr = buffer.readUInt8(currentOffset) - 1;
+    const lengthOfIsr: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
-    const isr = [];
+    const isr: number[] = [];
     for (let i = 0; i < lengthOfIsr; i++) {
-      const isrId = buffer.readUInt32BE(currentOffset);
+      const isrId: number = buffer.readUInt32BE(currentOffset);
       isr.push(isrId);
       currentOffset += 4;
     }
 
-    const lengthOfRemovingReplicas = buffer.readUInt8(currentOffset) - 1;
+    const lengthOfRemovingReplicas: number =
+      buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
-    const removingReplicas = [];
+    const removingReplicas: number[] = [];
     for (let i = 0; i < lengthOfRemovingReplicas; i++) {
-      const removingReplicaId = buffer.readUInt32BE(currentOffset);
+      const removingReplicaId: number = buffer.readUInt32BE(currentOffset);
       removingReplicas.push(removingReplicaId);
       currentOffset += 4;
     }
 
-    const lengthOfAddingReplicas = buffer.readUInt8(currentOffset) - 1;
+    const lengthOfAddingReplicas: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
-    const addingReplicas = [];
+    const addingReplicas: number[] = [];
     for (let i = 0; i < lengthOfAddingReplicas; i++) {
-      const addingReplicaId = buffer.readUInt32BE(currentOffset);
+      const addingReplicaId: number = buffer.readUInt32BE(currentOffset);
       addingReplicas.push(addingReplicaId);
       currentOffset += 4;
     }
 
-    const leader = buffer.readUInt32BE(currentOffset);
+    const leader: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
-    const leaderEpoch = buffer.readUInt32BE(currentOffset);
+    const leaderEpoch: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
-    const partitionEpoch = buffer.readUInt32BE(currentOffset);
+    const partitionEpoch: number = buffer.readUInt32BE(currentOffset);
     currentOffset += 4;
 
-    const lengthOfDirectory = buffer.readUInt8(currentOffset) - 1;
+    const lengthOfDirectory: number = buffer.readUInt8(currentOffset) - 1;
     currentOffset += 1;
-    const directory = buffer.subarray(
+    const directory: Buffer = buffer.subarray(
       currentOffset,
       currentOffset + lengthOfDirectory * 16
     );
     currentOffset += lengthOfDirectory * 16;
 
-    const tagFieldsCount = buffer.readUInt8(currentOffset);
+    const tagFieldsCount: number = buffer.readUInt8(currentOffset);
     currentOffset += 1;
 
-    return new KafkaClusterMetadataPartitionRecord(
+    return new KafkaPartition(
       frameVersion,
       type,
       version,

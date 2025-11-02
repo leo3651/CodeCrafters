@@ -1,8 +1,8 @@
 import fs from "fs";
-import { KafkaClusterMetadataRecordBatch } from "./metaDataParser";
+import { KafkaRecordBatch } from "./metaDataParser";
 
 export class KafkaPartitionLogFile {
-  constructor(public batches: KafkaClusterMetadataRecordBatch[]) {}
+  constructor(public recordBatches: KafkaRecordBatch[]) {}
 
   public static fromFile(filePath: string): KafkaPartitionLogFile {
     // Handle file not found error
@@ -10,34 +10,34 @@ export class KafkaPartitionLogFile {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    const data = fs.readFileSync(filePath);
+    const data: Buffer = fs.readFileSync(filePath);
     console.log(`Reading file: ${filePath} with size: ${data.length}`);
 
     return KafkaPartitionLogFile.fromBuffer(data);
   }
 
   public static fromBuffer(buffer: Buffer): KafkaPartitionLogFile {
-    let currentOffset = 0;
-    const batches: KafkaClusterMetadataRecordBatch[] = [];
+    let currentOffset: number = 0;
+    const recordBatches: KafkaRecordBatch[] = [];
 
     while (currentOffset < buffer.length) {
       // Start reading first record batch
-      const batch = KafkaClusterMetadataRecordBatch.fromBuffer(
+      const recordBatch = KafkaRecordBatch.fromBuffer(
         buffer.subarray(currentOffset)
       );
 
-      currentOffset += batch.bufferSize();
-      batches.push(batch);
+      currentOffset += recordBatch.bufferSize();
+      recordBatches.push(recordBatch);
     }
 
-    console.log(`batches size: ${batches.length}`);
-
-    const logFile = new KafkaPartitionLogFile(batches);
+    const logFile: KafkaPartitionLogFile = new KafkaPartitionLogFile(
+      recordBatches
+    );
 
     return logFile;
   }
 
-  getRecords(): KafkaClusterMetadataRecordBatch[] {
-    return this.batches;
+  getRecords(): KafkaRecordBatch[] {
+    return this.recordBatches;
   }
 }

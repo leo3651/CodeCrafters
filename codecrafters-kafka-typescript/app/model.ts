@@ -66,3 +66,15 @@ export interface ITopicFetchItem {
   topicId: Buffer;
   bufferSize: number;
 }
+
+export interface Variant {
+  value: number;
+  length: number;
+}
+
+export interface RecordHeader {
+  hKeyLen: number;
+  hKey: Buffer<ArrayBufferLike> | null;
+  hKeyValLen: number;
+  hKeyVal: Buffer<ArrayBufferLike> | null;
+}

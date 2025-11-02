@@ -6,10 +6,10 @@ const server: net.Server = net.createServer((socket: net.Socket) => {
 
   socket.on("data", (data) => {
     console.log("RECEIVED BUFFER: ");
-    console.log(data);
+    console.log(data.toString("hex"));
     console.log(`RECEIVED BUFFER TO STRING: ${data.toString()}`);
 
-    const resBuffer = kafkaHandler.createResponse(data);
+    const resBuffer: Buffer = kafkaHandler.createResponse(data);
 
     socket.write(resBuffer);
   });
