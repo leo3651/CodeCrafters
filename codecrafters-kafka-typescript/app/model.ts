@@ -1,37 +1,22 @@
-interface IKafkaHeader {
+export const REPLICAS_ARRAY_ITEM_BUFFER_SIZE: number = 4;
+export const ISR_ARRAY_ITEM_BUFFER_SIZE: number = 4;
+export const ELIGIBLE_REPLICAS_ARR_IT_BUF_SIZE: number = 4;
+export const LAST_KNOWN_ELR_ARR_IT_BUF_SIZE: number = 4;
+export const OFFLINE_REPLICAS_ARR_IT_BUF_SIZE: number = 4;
+
+export interface IKafkaRequestHeader {
   messageSize: number;
   correlationID: number;
-}
-
-export interface IKafkaRequestHeader extends IKafkaHeader {
   reqApiKey: number;
   reqApiVersion: number;
   clientID: Buffer;
   clientIDLen: number;
 }
 
-export interface IKafkaRequestDescribePartitions extends IKafkaRequestHeader {
-  topics: ITopic[];
-  partitionLimit: number;
-}
-
-export interface IKafkaFetchRequest extends IKafkaRequestHeader {
-  topics: ITopicFetchItem[];
-}
-
-export interface IKafkaResponseHeader extends IKafkaHeader {
-  errorCode: number;
-}
-
 export interface IApiVersion {
   apiKey: number;
   maxVersion: number;
   minVersion: number;
-}
-
-export interface ITopic {
-  topicName: Buffer;
-  topicNameLen: number;
 }
 
 export const enum EMetadataRecordType {
@@ -59,12 +44,6 @@ export enum EByteSize {
 
   writeBigUInt64BE,
   writeBigInt64BE,
-}
-
-export interface ITopicFetchItem {
-  partitions: number[];
-  topicId: Buffer;
-  bufferSize: number;
 }
 
 export interface Variant {

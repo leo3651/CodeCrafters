@@ -1,5 +1,5 @@
 import fs from "fs";
-import { KafkaRecordBatch } from "./metaDataParser";
+import { KafkaRecordBatch } from "./metaDataHandler";
 
 export class KafkaPartitionLogFile {
   constructor(public recordBatches: KafkaRecordBatch[]) {}

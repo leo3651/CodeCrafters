@@ -3,14 +3,14 @@ import {
   KafkaPartition,
   KafkaTopic,
   KafkaRecordBatch,
-} from "./metaDataParser";
+} from "./metaDataHandler";
 import { EByteSize, EErrorCode, type Variant } from "./model";
 import { buildBuffer, readVariant, writeUnsignedVariant } from "./utils";
 
 export class ProduceRequest {
   constructor(public topics: Topic[]) {}
 
-  public static from(buffer: Buffer): Topic[] {
+  public static parse(buffer: Buffer): Topic[] {
     let offset: number = 0;
 
     const { value: transactionalID, length: transactionalIDBufSize }: Variant =
@@ -44,7 +44,7 @@ export class ProduceRequest {
 }
 
 export class ProduceResponse {
-  public static responseFrom(
+  public static create(
     topics: Topic[],
     clusterMetadataLogFile: KafkaClusterMetadataLogFile
   ): Buffer {
