@@ -1,3 +1,4 @@
+import { KafkaPartitionLogFile } from "./kafkaPartitionsLogFile";
 import {
   KafkaClusterMetadataLogFile,
   KafkaPartition,
@@ -121,13 +122,19 @@ export class ProduceResponse {
       );
     }
     if (topicAndPartitionExists) {
-      this.writeDataToFile();
+      this.writeDataToFile(topic, partition);
     }
 
     return topicAndPartitionExists;
   }
 
-  private static writeDataToFile() {}
+  private static writeDataToFile(topic: Topic, partition: Partition) {
+    KafkaPartitionLogFile.write(
+      topic.topicName,
+      partition.partitionIndex,
+      partition.recordBatch
+    );
+  }
 
   private static createPartitionBuffer(
     partition: Partition,

@@ -37,7 +37,23 @@ export class KafkaPartitionLogFile {
     return logFile;
   }
 
-  getRecords(): KafkaRecordBatch[] {
+  public getRecords(): KafkaRecordBatch[] {
     return this.recordBatches;
+  }
+
+  public static write(
+    topicName: string,
+    partitionIndex: number,
+    recordBatches: KafkaRecordBatch[]
+  ): void {
+    const data: Buffer[] = recordBatches.flatMap(
+      (recordBatch: KafkaRecordBatch) =>
+        KafkaRecordBatch.buildRecordBatchBuffer(recordBatch)
+    );
+
+    fs.writeFileSync(
+      `/tmp/kraft-combined-logs/${topicName}-${partitionIndex}/00000000000000000000.log`,
+      Buffer.concat([...data])
+    );
   }
 }
