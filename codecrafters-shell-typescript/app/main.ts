@@ -1,144 +1,102 @@
-import { createInterface } from "readline";
-import {
-  commandHandler,
-  executeProgramIfPossible,
-  handleRedirectCommand,
-  isRedirectCommand,
-} from "./commandHandler";
-import fs from "fs";
+import { createInterface, Interface } from "readline";
+import { CommandOutput, Commands } from "./commands";
+import { Redirect } from "./redirect";
+import { getExecutables, getLongestCommonPrefix } from "./helpers";
+import { Pipeline } from "./pipeline";
 
-const AUDIO_CODE = "\u0007";
-const CLEAR_CURRENT_LINE = { ctrl: true, name: "u" };
-let previousPrompt = "";
-
-const rl = createInterface({
+let tabPressedPreviously: boolean = false;
+const rl: Interface = createInterface({
   input: process.stdin,
   output: process.stdout,
+  completer: autocomplete,
 });
 
-question();
+// MAIN
+const executablesPromise: Promise<string[]> = getExecutables();
+prompt();
 
-function question(): void {
-  rl.question("$ ", (answer: string) => {
-    const command = answer.split(" ")[0];
+// Definitions
+function prompt(): void {
+  rl.question("$ ", async (line) => {
+    tabPressedPreviously = false;
 
-    // Redirect command
-    if (isRedirectCommand(answer)) {
-      handleRedirectCommand(answer, rl);
+    // Pipe
+    if (line.includes(" | ")) {
+      await Pipeline.exe(line);
     }
 
-    // Built in command
-    else if (Object.keys(commandHandler).includes(command)) {
-      commandHandler[command](rl, answer, true, false);
-    }
-
-    // Command not found || execute program
-    else {
-      const buffer = executeProgramIfPossible(answer, true, rl);
-
-      if (buffer) {
-        rl.write(buffer.toString("utf-8"));
-      } else {
-        rl.write(`${answer}: command not found\n`);
+    // Redirect
+    else if (Redirect.isRedirectCommand(line)) {
+      const output = Redirect.handleRedirectCommand(line);
+      if (output) {
+        rl.write(output);
       }
     }
 
-    question();
+    // Command
+    else {
+      try {
+        const { stderr, stdout }: CommandOutput = Commands.execute(line);
+        const output = stdout.join("") || stderr.join("");
+
+        if (output) {
+          rl.write(output);
+        }
+      } catch (err) {
+        rl.write(`${line}: command not found\n`);
+      }
+    }
+
+    prompt();
   });
 }
 
-process.stdin.on("keypress", (_, key) => {
-  // On TAB
-  if (key.sequence === "\t") {
-    const completions = ["echo", "exit"];
-    const line = rl.line.replaceAll("\t", "");
+async function autocomplete(
+  line: string,
+  cb: (err: any, result: [string[], string]) => void
+): Promise<void> {
+  const executables: string[] = await executablesPromise;
+  const allCommands: string[] = [...Commands.available, ...executables];
+  const completions: string[] = [...new Set(allCommands)].filter((cmd) =>
+    cmd.startsWith(line)
+  );
 
-    // Add environment commands hits
-    const envPaths = process.env.PATH?.split(":");
-    const eligiblePaths: string[] =
-      envPaths
-        ?.flatMap((path) => {
-          try {
-            return fs
-              .readdirSync(path)
-              .filter((fileName) => fileName.startsWith(line));
-          } catch (err) {
-            return [];
-          }
-        })
-        .filter((file) => file !== undefined && file !== null) || [];
+  // Ring a bell
+  if (completions.length === 0) {
+    process.stdout.write("\x07");
+    cb(null, [[], line]);
+  }
 
-    // Add builtin commands hits
-    const builtinHits = completions.filter((c) => c.startsWith(line));
+  // Autocomplete line
+  else if (completions.length === 1) {
+    cb(null, [[`${completions[0]} `], line]);
+  }
 
-    const hits = [...new Set([...builtinHits, ...eligiblePaths])];
-
-    // Only one hit found
-    if (hits.length === 1) {
-      rl.write(null, CLEAR_CURRENT_LINE);
-      rl.write(hits[0] + " ");
+  // Multiple completions
+  else if (completions.length > 0) {
+    // Print all possibilities
+    if (tabPressedPreviously) {
+      process.stdout.write(`\n${completions.sort().join("  ")}\n$ ${line}`);
+      cb(null, [[], line]);
     }
 
-    // Multiple hits found
-    else if (hits.length > 1) {
-      // Only environmental commands found
-      if (!builtinHits.length && eligiblePaths.length) {
-        // All hits have same prefixes
-        if (allPathsWithSamePrefixes(hits, line)) {
-          hits.sort();
-          rl.write(null, CLEAR_CURRENT_LINE);
-          rl.write(hits[0]);
-        }
-
-        // Hits DON'T have same prefixes
-        else {
-          // First ring the bell then on second TAB write all commands to the terminal
-          if (previousPrompt !== line) {
-            previousPrompt = line;
-            process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
-          } else {
-            process.stdout.write(`\n${hits.sort().join("  ")}\n`);
-            process.stdout.write("\r$ " + line);
-          }
-        }
-      }
-
-      // Environmental commands and builtin commands found. Write all to the terminal
-      else {
-        process.stdout.write(`\n${hits.sort().join("  ")}\n`);
-        process.stdout.write("\r$ " + line);
-      }
-    }
-
-    // No hit found
+    // Ring a bell or autocomplete common prefix
     else {
-      // Ring the bell
-      process.stdout.write("\r$ " + rl.line.trim() + AUDIO_CODE);
+      const longestCommonPrefix = getLongestCommonPrefix(completions);
+      if (longestCommonPrefix) {
+        cb(null, [[longestCommonPrefix], line]);
+      } else {
+        process.stdout.write("\x07");
+        cb(null, [[], line]);
+      }
     }
   }
 
-  if (key.ctrl && key.name === "c") {
-    console.log("Exiting...");
-    process.exit();
+  tabPressedPreviously = true;
+}
+
+process.stdin.on("keypress", (_, key) => {
+  if (key.sequence !== "\t") {
+    tabPressedPreviously = false;
   }
 });
-
-function allPathsWithSamePrefixes(hits: string[], line: string): boolean {
-  if (hits.every((hit) => hit.includes(line))) {
-    const shallowCopyHits = [...hits];
-    shallowCopyHits.sort();
-
-    for (let i = 0; i < shallowCopyHits.length; i++) {
-      if (
-        !shallowCopyHits[shallowCopyHits.length - 1].includes(
-          shallowCopyHits[i]
-        )
-      ) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  return false;
-}
