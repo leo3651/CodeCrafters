@@ -1,5 +1,5 @@
 import { createInterface, Interface } from "readline";
-import { CommandOutput, Commands } from "./commands";
+import { CommandOutput, Commands, History } from "./commands";
 import { Redirect } from "./redirect";
 import { getExecutables, getLongestCommonPrefix } from "./helpers";
 import { Pipeline } from "./pipeline";
@@ -9,6 +9,7 @@ const rl: Interface = createInterface({
   input: process.stdin,
   output: process.stdout,
   completer: autocomplete,
+  historySize: 0,
 });
 
 // MAIN
@@ -18,7 +19,7 @@ prompt();
 // Definitions
 function prompt(): void {
   rl.question("$ ", async (line) => {
-    tabPressedPreviously = false;
+    History.add(line);
 
     // Pipe
     if (line.includes(" | ")) {
@@ -96,7 +97,17 @@ async function autocomplete(
 }
 
 process.stdin.on("keypress", (_, key) => {
-  if (key.sequence !== "\t") {
+  if (key.name !== "tab") {
     tabPressedPreviously = false;
+  }
+
+  if (key.name === "up") {
+    rl.write(null, { ctrl: true, name: "u" });
+    rl.write(`${History.getPrevious()}`);
+  }
+
+  if (key.name === "down") {
+    rl.write(null, { ctrl: true, name: "u" });
+    rl.write(`${History.getNext()}`);
   }
 });

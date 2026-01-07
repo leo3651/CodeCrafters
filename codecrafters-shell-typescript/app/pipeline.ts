@@ -5,11 +5,13 @@ import {
 } from "child_process";
 import { PassThrough } from "stream";
 import { CommandOutput, Commands, ExternalCommand } from "./commands";
+import { QuotesHandler } from "./helpers";
 
 export class Pipeline {
   public static async exe(line: string): Promise<void> {
     return new Promise((resolve) => {
-      const commands: string[] = line.split(" | ");
+      const commands: string[] =
+        QuotesHandler.handleQuotes(line).finalString.split(" | ");
 
       let upstream: NodeJS.ReadableStream | null = null;
       let lastChild: ChildProcess | null = null;
@@ -19,6 +21,7 @@ export class Pipeline {
 
         const [command, ...args]: string[] = commands[i].split(" ");
 
+        // Builtin command
         if (Commands.available.includes(command)) {
           if (upstream) {
             upstream.resume();
@@ -26,9 +29,11 @@ export class Pipeline {
           const { stdout }: CommandOutput = Commands.execute(commands[i]);
           downStream.write(stdout.join(""));
           downStream.end();
-        } else {
-          const exeFilePath: string = ExternalCommand.checkForExeFile(command);
+        }
 
+        // External exe
+        else {
+          const exeFilePath: string = ExternalCommand.checkForExeFile(command);
           if (!exeFilePath) {
             throw new Error("Invalid command");
           }

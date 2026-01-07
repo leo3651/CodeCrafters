@@ -12,6 +12,7 @@ export class Commands {
     "type",
     "pwd",
     "cd",
+    "history",
   ];
 
   public static execute(line: string): CommandOutput {
@@ -43,6 +44,9 @@ export class Commands {
 
       case "cd":
         return Cd.exe(line);
+
+      case "history":
+        return History.exe(line);
 
       default:
         throw new Error("Unknown built in command");
@@ -109,6 +113,41 @@ class Cd {
     }
 
     return { stdout: [], stderr: [output] };
+  }
+}
+
+export class History {
+  private static history: string[] = [];
+  public static historyPointer = 0;
+
+  public static add(cmd: string) {
+    this.history.push(cmd);
+    this.historyPointer = this.history.length;
+  }
+
+  public static exe(line: string) {
+    const limit: number = Number.parseInt(line.split("history ")[1]);
+
+    let output: string[] = this.history.map((cmd, i) => `    ${++i}  ${cmd}\n`);
+    output = limit ? output.slice(output.length - limit) : output;
+
+    return { stdout: [output.join("")], stderr: [] };
+  }
+
+  public static getNext(): string {
+    this.historyPointer++;
+    if (this.historyPointer > this.history.length) {
+      this.historyPointer = this.history.length;
+    }
+    return this.history[this.historyPointer] || "";
+  }
+
+  public static getPrevious(): string {
+    this.historyPointer--;
+    if (this.historyPointer < 0) {
+      this.historyPointer = 0;
+    }
+    return this.history[this.historyPointer] || "";
   }
 }
 
