@@ -301,7 +301,7 @@ export class MatchAST {
     }
 
     // {n,}
-    else if (min > 0 && matchedTimesNum >= min) {
+    else if (min > 0 && !max && matchedTimesNum >= min) {
       return true;
     }
 
