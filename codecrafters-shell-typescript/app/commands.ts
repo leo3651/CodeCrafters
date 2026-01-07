@@ -118,7 +118,8 @@ class Cd {
 
 export class History {
   private static history: string[] = [];
-  public static historyPointer = 0;
+  private static historyPointer: number = 0;
+  private static lastAppendPointer: number = 0;
 
   public static add(cmd: string) {
     this.history.push(cmd);
@@ -126,10 +127,20 @@ export class History {
   }
 
   public static exe(line: string) {
-    const limit: number = Number.parseInt(line.split("history ")[1]);
+    const arg: string = line.split(" ")[1];
+    const filePath: string = line.split(" ")[2];
+    let output: string[] = [];
 
-    let output: string[] = this.history.map((cmd, i) => `    ${++i}  ${cmd}\n`);
-    output = limit ? output.slice(output.length - limit) : output;
+    if (arg === "-r") {
+      this.importHistory(filePath);
+    } else if (arg === "-w" || arg === "-a") {
+      const flag: string = arg;
+      this.writeHistory(filePath, flag);
+    } else {
+      const limit: number = Number.parseInt(arg);
+      output = this.history.map((cmd, i) => `    ${++i}  ${cmd}\n`);
+      output = limit ? output.slice(output.length - limit) : output;
+    }
 
     return { stdout: [output.join("")], stderr: [] };
   }
@@ -148,6 +159,25 @@ export class History {
       this.historyPointer = 0;
     }
     return this.history[this.historyPointer] || "";
+  }
+
+  private static importHistory(filePath: string): void {
+    const data: Buffer = fs.readFileSync(filePath);
+    const history: string[] = data
+      .toString()
+      .split("\n")
+      .filter((cmd) => cmd);
+    this.history = [...this.history, ...history];
+  }
+
+  private static writeHistory(filePath: string, flag: string): void {
+    const data: string = this.history
+      .slice(flag === "-a" ? this.lastAppendPointer : 0)
+      .join("\n");
+
+    fs.writeFileSync(filePath, `${data}\n`, { flag: flag.slice(1) });
+
+    this.lastAppendPointer = this.history.length;
   }
 }
 
