@@ -13,12 +13,13 @@ const rl: Interface = createInterface({
 });
 
 // MAIN
+History.load();
 const executablesPromise: Promise<string[]> = getExecutables();
 prompt();
 
 // Definitions
 function prompt(): void {
-  rl.question("$ ", async (line) => {
+  rl.question("$ ", async (line: string) => {
     History.add(line);
 
     // Pipe
@@ -28,7 +29,7 @@ function prompt(): void {
 
     // Redirect
     else if (Redirect.isRedirectCommand(line)) {
-      const output = Redirect.handleRedirectCommand(line);
+      const output: string = Redirect.handleRedirectCommand(line);
       if (output) {
         rl.write(output);
       }
@@ -38,7 +39,7 @@ function prompt(): void {
     else {
       try {
         const { stderr, stdout }: CommandOutput = Commands.execute(line);
-        const output = stdout.join("") || stderr.join("");
+        const output: string = stdout.join("") || stderr.join("");
 
         if (output) {
           rl.write(output);

@@ -61,6 +61,7 @@ class Exit {
   }
 
   public static exe(number: number): void {
+    History.store();
     process.exit(0);
   }
 }
@@ -121,12 +122,12 @@ export class History {
   private static historyPointer: number = 0;
   private static lastAppendPointer: number = 0;
 
-  public static add(cmd: string) {
+  public static add(cmd: string): void {
     this.history.push(cmd);
     this.historyPointer = this.history.length;
   }
 
-  public static exe(line: string) {
+  public static exe(line: string): CommandOutput {
     const arg: string = line.split(" ")[1];
     const filePath: string = line.split(" ")[2];
     let output: string[] = [];
@@ -134,7 +135,7 @@ export class History {
     if (arg === "-r") {
       this.importHistory(filePath);
     } else if (arg === "-w" || arg === "-a") {
-      const flag: string = arg;
+      const flag: string = arg.slice(1);
       this.writeHistory(filePath, flag);
     } else {
       const limit: number = Number.parseInt(arg);
@@ -172,12 +173,31 @@ export class History {
 
   private static writeHistory(filePath: string, flag: string): void {
     const data: string = this.history
-      .slice(flag === "-a" ? this.lastAppendPointer : 0)
+      .slice(flag === "a" ? this.lastAppendPointer : 0)
       .join("\n");
 
-    fs.writeFileSync(filePath, `${data}\n`, { flag: flag.slice(1) });
+    fs.writeFileSync(filePath, `${data}\n`, { flag });
 
     this.lastAppendPointer = this.history.length;
+  }
+
+  public static load(): void {
+    const filePath: string | undefined = process.env.HISTFILE;
+    if (!filePath) {
+      return;
+    }
+
+    this.importHistory(filePath);
+    this.lastAppendPointer = this.history.length;
+  }
+
+  public static store(): void {
+    const filePath: string | undefined = process.env.HISTFILE;
+    if (!filePath) {
+      return;
+    }
+
+    this.writeHistory(filePath, "a");
   }
 }
 
