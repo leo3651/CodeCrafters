@@ -20,3 +20,6 @@ for (let i = "A".charCodeAt(0); i <= "Z".charCodeAt(0); i++) {
   ALPHA.push(String.fromCharCode(i));
 }
 ALPHA.push("_");
+
+export const RED = "\x1b[01;31m";
+export const RESET = "\x1b[m";

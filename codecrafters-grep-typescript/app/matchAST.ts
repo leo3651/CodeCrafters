@@ -1,10 +1,6 @@
 import { DIGITS, ALPHA } from "./constants.js";
-import type { RegexAST } from "./regexAST.js";
-
-type Position = {
-  position: number;
-  groups: string[];
-}[];
+import type { RegexAST } from "./model.js";
+import type { Position } from "./model.js";
 
 export class MatchAST {
   private static groupIndex = 0;
@@ -27,17 +23,20 @@ export class MatchAST {
     }
   }
 
-  public static matchAST(
+  public static getPosition(
     node: RegexAST,
     i: number,
     inputLine: string
-  ): boolean {
+  ): Position | null {
     this.groupIndex = 0;
     this.assignGroupIndices(node);
 
-    const posAndGroupsArr: Position = this.match(node, i, [], inputLine);
+    const pos: Position[] = this.match(node, i, [], inputLine);
+    if (pos[0]) {
+      pos[0].positionStart = i;
+    }
 
-    return posAndGroupsArr.some(({ position }) => position > -1);
+    return pos[0] || null;
   }
 
   private static match(
@@ -45,67 +44,67 @@ export class MatchAST {
     i: number,
     groups: string[],
     inputLine: string
-  ): { position: number; groups: string[] }[] {
+  ): Position[] {
     switch (node.type) {
       case "Sequence": {
-        let posAndGroupsArr: Position = [{ position: i, groups }];
+        let posAndGroupsArr: Position[] = [{ positionEnd: i, groups }];
 
         for (const el of node.elements) {
-          const nextPosAndGroupsArr: Position = [];
+          const nextPosAndGroupsArr: Position[] = [];
 
-          for (const { position: p, groups: g } of posAndGroupsArr) {
+          for (const { positionEnd: p, groups: g } of posAndGroupsArr) {
             if (p > -1) {
               nextPosAndGroupsArr.push(...this.match(el, p, g, inputLine));
             }
           }
           posAndGroupsArr = nextPosAndGroupsArr;
 
-          if (!posAndGroupsArr.some(({ position }) => position > -1)) {
+          if (!posAndGroupsArr.some(({ positionEnd }) => positionEnd > -1)) {
             break;
           }
         }
 
-        return posAndGroupsArr;
+        return posAndGroupsArr.filter(({ positionEnd }) => positionEnd > -1);
       }
 
       case "Literal":
         if (inputLine[i] === node.value) {
-          return [{ groups, position: ++i }];
+          return [{ groups, positionEnd: ++i }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "Digit":
         if (DIGITS.includes(inputLine[i])) {
-          return [{ position: ++i, groups }];
+          return [{ positionEnd: ++i, groups }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "Anchor":
         if (node.kind === "start") {
           return i === 0
-            ? [{ position: i, groups }]
-            : [{ position: -1, groups }];
+            ? [{ positionEnd: i, groups }]
+            : [{ positionEnd: -1, groups }];
         } else {
           return i === inputLine.length
-            ? [{ position: i, groups }]
-            : [{ position: -1, groups }];
+            ? [{ positionEnd: i, groups }]
+            : [{ positionEnd: -1, groups }];
         }
 
       case "Word":
         if (ALPHA.includes(inputLine[i]) || DIGITS.includes(inputLine[i])) {
-          return [{ position: ++i, groups }];
+          return [{ positionEnd: ++i, groups }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "BackReference":
         const backRef: string = groups[node.index] || "";
         if (backRef && inputLine.startsWith(backRef, i)) {
-          return [{ position: i + backRef.length, groups }];
+          return [{ positionEnd: i + backRef.length, groups }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "CharClass":
@@ -114,16 +113,16 @@ export class MatchAST {
           : node.chars.includes(inputLine[i]);
 
         if (match && i < inputLine.length) {
-          return [{ position: ++i, groups }];
+          return [{ positionEnd: ++i, groups }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "Wildcard":
         if (i < inputLine.length) {
-          return [{ position: ++i, groups }];
+          return [{ positionEnd: ++i, groups }];
         } else {
-          return [{ position: -1, groups }];
+          return [{ positionEnd: -1, groups }];
         }
 
       case "Alternative":
@@ -137,15 +136,15 @@ export class MatchAST {
           node.quant === "*" ||
           node.quant.startsWith("{")
         ) {
-          let [allPosAndGroupsArr, matchedTimesNum]: [Position, number] =
+          let [allPosAndGroupsArr, matchedTimesNum]: [Position[], number] =
             this.matchNTimes(node.child, groups, inputLine, i);
 
           // '*'
           if (
             node.quant === "*" &&
-            allPosAndGroupsArr.every(({ position }) => position === -1)
+            allPosAndGroupsArr.every(({ positionEnd }) => positionEnd === -1)
           ) {
-            return (allPosAndGroupsArr = [{ position: ++i, groups }]);
+            return (allPosAndGroupsArr = [{ positionEnd: ++i, groups }]);
           }
 
           // '{}'
@@ -169,7 +168,7 @@ export class MatchAST {
             ) {
               return allPosAndGroupsArr;
             } else {
-              return (allPosAndGroupsArr = [{ position: -1, groups }]);
+              return (allPosAndGroupsArr = [{ positionEnd: -1, groups }]);
             }
           }
 
@@ -181,7 +180,7 @@ export class MatchAST {
 
         // '?'
         else {
-          const posAndGroupsArr: Position = this.match(
+          const posAndGroupsArr: Position[] = this.match(
             node.child,
             i,
             groups,
@@ -189,18 +188,18 @@ export class MatchAST {
           );
 
           return posAndGroupsArr.map(
-            ({ position: newPos, groups: newGroups }) => {
+            ({ positionEnd: newPos, groups: newGroups }) => {
               if (newPos > -1) {
-                return { position: newPos, groups: newGroups };
+                return { positionEnd: newPos, groups: newGroups };
               } else {
-                return { position: i, groups };
+                return { positionEnd: i, groups };
               }
             }
           );
         }
 
       case "Group":
-        const posAndGroupsArr: Position = this.match(
+        const posAndGroupsArr: Position[] = this.match(
           node.child,
           i,
           groups,
@@ -208,12 +207,12 @@ export class MatchAST {
         );
 
         return posAndGroupsArr.map(
-          ({ position: groupEndIndex, groups: newGroups }) => {
+          ({ positionEnd: groupEndIndex, groups: newGroups }) => {
             if (groupEndIndex > -1) {
               newGroups[node.index] = inputLine.slice(i, groupEndIndex);
-              return { position: groupEndIndex, groups: newGroups };
+              return { positionEnd: groupEndIndex, groups: newGroups };
             } else {
-              return { position: -1, groups };
+              return { positionEnd: -1, groups };
             }
           }
         );
@@ -228,21 +227,21 @@ export class MatchAST {
     groups: string[],
     inputLine: string,
     i: number
-  ): [Position, number] {
+  ): [Position[], number] {
     let matchedTimesNum: number = 0;
-    let posAndGroupsResult: Position = this.match(node, i, groups, inputLine);
-    let allPosAndGroupsArr: Position = [...posAndGroupsResult];
+    let posAndGroupsResult: Position[] = this.match(node, i, groups, inputLine);
+    let allPosAndGroupsArr: Position[] = [...posAndGroupsResult];
 
     while (true) {
-      if (!posAndGroupsResult.some(({ position }) => position > -1)) {
+      if (!posAndGroupsResult.some(({ positionEnd }) => positionEnd > -1)) {
         break;
       }
       matchedTimesNum++;
 
-      let nextResults: Position = [];
-      posAndGroupsResult.forEach(({ position, groups }) => {
-        if (position > -1) {
-          nextResults.push(...this.match(node, position, groups, inputLine));
+      let nextResults: Position[] = [];
+      posAndGroupsResult.forEach(({ positionEnd, groups }) => {
+        if (positionEnd > -1) {
+          nextResults.push(...this.match(node, positionEnd, groups, inputLine));
           allPosAndGroupsArr.push(...nextResults);
         }
       });

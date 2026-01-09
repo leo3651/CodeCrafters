@@ -4,8 +4,8 @@ export class Tokenizer {
     let i: number = 0;
 
     // Anchors
-    const hasAnchorStart:boolean = pattern[0] === "^";
-    const hasAnchorEnd:boolean = pattern[-1] === "$";
+    const hasAnchorStart: boolean = pattern[0] === "^";
+    const hasAnchorEnd: boolean = pattern[-1] === "$";
 
     if (hasAnchorStart) {
       tokens.push("^");
@@ -23,11 +23,9 @@ export class Tokenizer {
         } else {
           throw new Error(`Unexpected end of pattern ${pattern[i]}`);
         }
-      } 
-      
-      else if (pattern[i] === "[") {
+      } else if (pattern[i] === "[") {
         if (i + 1 < pattern.length) {
-          let j = i + 1;
+          let j: number = i + 1;
           while (j < pattern.length && pattern[j] !== "]") {
             j++;
           }
@@ -41,13 +39,11 @@ export class Tokenizer {
         } else {
           throw new Error(`Unexpected end of pattern ${pattern[i]}`);
         }
-      } 
-      
-      else if (pattern[i] === ".") {
+      } else if (pattern[i] === ".") {
         tokens.push("WILDCARD");
         i++;
       } else if (pattern[i] === "{") {
-        let j:number = i + 1;
+        let j: number = i + 1;
         while (j < pattern.length && pattern[j] !== "}") {
           j++;
         }
@@ -59,9 +55,7 @@ export class Tokenizer {
         }
 
         i = j + 1;
-      } 
-      
-      else {
+      } else {
         tokens.push(pattern[i]);
         i++;
       }

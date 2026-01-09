@@ -1,15 +1,4 @@
-export type RegexAST =
-  | { type: "Sequence"; elements: RegexAST[] }
-  | { type: "Alternative"; options: RegexAST[] }
-  | { type: "Group"; child: RegexAST; index: number }
-  | { type: "Quantifier"; quant: string; child: RegexAST }
-  | { type: "Literal"; value: string }
-  | { type: "Digit" } // for \d
-  | { type: "Anchor"; kind: "start" | "end" }
-  | { type: "Wildcard" }
-  | { type: "Word" } // for \w
-  | { type: "CharClass"; chars: string; negated?: boolean }
-  | { type: "BackReference"; index: number };
+import type { RegexAST } from "./model";
 
 export class RegexASTHandler {
   public static createRegexSAT(
@@ -26,46 +15,32 @@ export class RegexASTHandler {
         elements.push({ type: "Anchor", kind: "start" });
 
         i++;
-      } 
-      
-      else if (token === "$") {
+      } else if (token === "$") {
         elements.push({ type: "Anchor", kind: "end" });
 
         i++;
-      } 
-      
-      else if (token === ")") {
+      } else if (token === ")") {
         return [{ type: "Sequence", elements }, i + 1];
-      } 
-      
-      else if (token === "\\d") {
+      } else if (token === "\\d") {
         elements.push({ type: "Digit" });
 
         i++;
-      } 
-      
-      else if (token === "WILDCARD") {
+      } else if (token === "WILDCARD") {
         elements.push({ type: "Wildcard" });
 
         i++;
-      } 
-      
-      else if (token === "\\w") {
+      } else if (token === "\\w") {
         elements.push({ type: "Word" });
 
         i++;
-      } 
-      
-      else if (token === "(") {
+      } else if (token === "(") {
         const [child, newIndex]: [RegexAST, number] = this.createRegexSAT(
           tokens,
           i + 1
         );
         elements.push({ type: "Group", child, index: -999 });
         i = newIndex;
-      } 
-      
-      else if (token === "|") {
+      } else if (token === "|") {
         const [right, newIndex]: [RegexAST, number] = this.createRegexSAT(
           tokens,
           i + 1
@@ -77,9 +52,7 @@ export class RegexASTHandler {
           },
           newIndex,
         ];
-      } 
-      
-      else if (
+      } else if (
         token.endsWith("+") ||
         token.endsWith("?") ||
         token.endsWith("*") ||
@@ -101,9 +74,7 @@ export class RegexASTHandler {
         }
 
         i++;
-      } 
-      
-      else if (
+      } else if (
         token.length > 1 &&
         token[0] === "\\" &&
         token
@@ -115,17 +86,13 @@ export class RegexASTHandler {
         elements.push({ type: "BackReference", index });
 
         i++;
-      } 
-      
-      else if (token.startsWith("[") && token.endsWith("]")) {
+      } else if (token.startsWith("[") && token.endsWith("]")) {
         const negated: boolean = token[1] === "^";
         const chars: string = negated ? token.slice(2, -1) : token.slice(1, -1);
         elements.push({ type: "CharClass", chars, negated });
 
         i++;
-      } 
-      
-      else {
+      } else {
         elements.push({ type: "Literal", value: token });
 
         i++;
