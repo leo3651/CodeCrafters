@@ -256,7 +256,7 @@ export class KafkaRecordBatch {
       );
     }
 
-    const recordBatch = new KafkaRecordBatch(
+    const recordBatch: KafkaRecordBatch = new KafkaRecordBatch(
       baseOffset,
       batchLength,
       partitionLeaderEpoch,

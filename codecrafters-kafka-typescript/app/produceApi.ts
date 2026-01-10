@@ -27,7 +27,7 @@ export class ProduceRequest {
     const { value: numOfTopicsPlusOne, length: numOfTopicsBufSize }: Variant =
       readVariant(buffer.subarray(offset), false);
     offset += numOfTopicsBufSize;
-    const numOfTopics = numOfTopicsPlusOne - 1;
+    const numOfTopics: number = numOfTopicsPlusOne - 1;
 
     const topics: Topic[] = [];
 
@@ -140,31 +140,31 @@ export class ProduceResponse {
     partition: Partition,
     partitionValid: boolean
   ) {
-    const partitionIndexBuf = buildBuffer(
+    const partitionIndexBuf: Buffer = buildBuffer(
       EByteSize.writeInt32BE,
       partition.partitionIndex
     );
 
-    const errorCodeBuf = buildBuffer(
+    const errorCodeBuf: Buffer = buildBuffer(
       EByteSize.writeInt16BE,
       partitionValid
         ? EErrorCode.NO_ERROR
         : EErrorCode.UNKNOWN_TOPIC_OR_PARTITION
     );
 
-    const baseOffsetBuf = buildBuffer(
+    const baseOffsetBuf: Buffer = buildBuffer(
       EByteSize.writeBigInt64BE,
       partitionValid ? 0n : -1n
     );
-    const logAppendBuf = buildBuffer(EByteSize.writeBigInt64BE, -1n);
-    const logStartBuf = buildBuffer(
+    const logAppendBuf: Buffer = buildBuffer(EByteSize.writeBigInt64BE, -1n);
+    const logStartBuf: Buffer = buildBuffer(
       EByteSize.writeBigInt64BE,
       partitionValid ? 0n : -1n
     );
 
-    const recordsErrArrLenBuf = buildBuffer(EByteSize.writeUInt8, 1);
-    const errorMessBuf = buildBuffer(EByteSize.writeUInt8, 0);
-    const tagBuf = buildBuffer(EByteSize.writeUInt8, 0);
+    const recordsErrArrLenBuf: Buffer = buildBuffer(EByteSize.writeUInt8, 1);
+    const errorMessBuf: Buffer = buildBuffer(EByteSize.writeUInt8, 0);
+    const tagBuf: Buffer = buildBuffer(EByteSize.writeUInt8, 0);
 
     return Buffer.concat([
       partitionIndexBuf,

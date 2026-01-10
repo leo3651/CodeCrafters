@@ -22,7 +22,7 @@ export class KafkaPartitionLogFile {
 
     while (currentOffset < buffer.length) {
       // Start reading first record batch
-      const recordBatch = KafkaRecordBatch.fromBuffer(
+      const recordBatch: KafkaRecordBatch = KafkaRecordBatch.fromBuffer(
         buffer.subarray(currentOffset)
       );
 

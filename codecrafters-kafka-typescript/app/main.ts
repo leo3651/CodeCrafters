@@ -4,7 +4,7 @@ import { kafkaHandler } from "./kafkaHandler";
 const server: net.Server = net.createServer((socket: net.Socket) => {
   console.log(`Client ${socket.remoteAddress}:${socket.remotePort} CONNECTED!`);
 
-  socket.on("data", (data) => {
+  socket.on("data", (data: Buffer) => {
     console.log("RECEIVED BUFFER: ");
     console.log(data.toString("hex"));
     console.log(`RECEIVED BUFFER TO STRING: ${data.toString()}`);

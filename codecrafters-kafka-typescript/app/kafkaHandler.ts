@@ -13,7 +13,7 @@ class KafkaHandler {
   private clusterMetadataLogFile!: KafkaClusterMetadataLogFile;
 
   constructor() {
-    const fileLocation = process.argv[2];
+    const fileLocation: string = process.argv[2];
     if (fileLocation) {
       try {
         this.clusterMetadataLogFile = KafkaClusterMetadataLogFile.fromFile(
@@ -29,12 +29,12 @@ class KafkaHandler {
   public createResponse(data: Buffer): Buffer {
     let responseBody: Buffer = Buffer.alloc(0);
 
-    const messageSize = data.readInt32BE();
-    const reqApiKey = data.readInt16BE(4);
-    const reqApiVersion = data.readInt16BE(6);
-    const correlationID = data.readInt32BE(8);
-    const clientIDLen = data.readInt16BE(12);
-    const clientID = data.slice(14, 14 + clientIDLen);
+    const messageSize: number = data.readInt32BE();
+    const reqApiKey: number = data.readInt16BE(4);
+    const reqApiVersion: number = data.readInt16BE(6);
+    const correlationID: number = data.readInt32BE(8);
+    const clientIDLen: number = data.readInt16BE(12);
+    const clientID: Buffer = data.slice(14, 14 + clientIDLen);
 
     const commonHeader: IKafkaRequestHeader = {
       messageSize,
@@ -47,13 +47,16 @@ class KafkaHandler {
     console.log("HEADER: ");
     console.log(commonHeader);
 
-    const correlationIDBuf = buildBuffer(EByteSize.writeInt32BE, correlationID);
-    const tagBuffer = buildBuffer(EByteSize.writeInt8, 0);
+    const correlationIDBuf: Buffer = buildBuffer(
+      EByteSize.writeInt32BE,
+      correlationID
+    );
+    const tagBuffer: Buffer = buildBuffer(EByteSize.writeInt8, 0);
 
     // 14 - start of clientID + clientIDLength + tagBuffer
-    const relevantDataOffset = 14 + clientIDLen + 1;
+    const relevantDataOffset: number = 14 + clientIDLen + 1;
 
-    // Api versions
+    // Versions
     if (reqApiKey === 18) {
       responseBody = VersionsResponse.createV4ResponseBody(commonHeader);
     }
@@ -72,7 +75,9 @@ class KafkaHandler {
 
     // Fetch
     else if (reqApiKey === 1) {
-      const { topics } = FetchRequest.parse(data.subarray(relevantDataOffset));
+      const { topics }: FetchRequest = FetchRequest.parse(
+        data.subarray(relevantDataOffset)
+      );
 
       responseBody = Buffer.concat([
         correlationIDBuf,
@@ -94,7 +99,7 @@ class KafkaHandler {
       ]);
     }
 
-    const mesLenBuffer = buildBuffer(
+    const mesLenBuffer: Buffer = buildBuffer(
       EByteSize.writeInt32BE,
       responseBody.length
     );
@@ -103,6 +108,6 @@ class KafkaHandler {
   }
 }
 
-const kafkaHandler = new KafkaHandler();
+const kafkaHandler: KafkaHandler = new KafkaHandler();
 
 export { kafkaHandler };
