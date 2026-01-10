@@ -84,7 +84,7 @@ async function autocomplete(
 
     // Ring a bell or autocomplete common prefix
     else {
-      const longestCommonPrefix = getLongestCommonPrefix(completions);
+      const longestCommonPrefix: string = getLongestCommonPrefix(completions);
       if (longestCommonPrefix) {
         cb(null, [[longestCommonPrefix], line]);
       } else {

@@ -80,7 +80,7 @@ export class QuotesHandler {
       // Handle single quotes
       else if (str[i] === "'") {
         i++;
-        let start = i;
+        let start: number = i;
 
         while (str[i] !== "'") {
           i++;
