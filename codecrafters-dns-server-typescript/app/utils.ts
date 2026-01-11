@@ -1,6 +1,6 @@
 export function getRecordTypeBuffer(recordType: string): Buffer {
-  const rTypeBuffer = Buffer.alloc(2);
-  let type = -999;
+  const rTypeBuffer: Buffer = Buffer.alloc(2);
+  let type: number = -999;
 
   // A
   if (recordType === "A") {
@@ -16,7 +16,7 @@ export function getRecordTypeBuffer(recordType: string): Buffer {
   return rTypeBuffer;
 }
 
-export function getRecordClassBuffer(qClassNum: number) {
+export function getRecordClassBuffer(qClassNum: number): Buffer {
   const recordClass = Buffer.alloc(2);
   recordClass.writeUint16BE(qClassNum, 0);
   return recordClass;

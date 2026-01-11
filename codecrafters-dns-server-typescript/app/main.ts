@@ -1,13 +1,15 @@
 import * as dgram from "dgram";
-import { DnsHandler } from "./dnsHandler";
+import { DnsWriter } from "./dnsWriter";
 import type { DnsHeader, ParsedAnswer, ParsedQuestion } from "./model";
+import { DnsParser } from "./dnsParser";
 
 const udpSocket: dgram.Socket = dgram.createSocket("udp4");
 udpSocket.bind(2053, "127.0.0.1");
-const dnsHandler = new DnsHandler();
 
-const address = process.argv[3];
-const [resolverIp, resolverPort] = address ? address.split(":") : [null, null];
+const address: string = process.argv[3];
+const [resolverIp, resolverPort]: string[] | null[] = address
+  ? address.split(":")
+  : [null, null];
 
 udpSocket.on("message", async (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
   try {
@@ -17,15 +19,16 @@ udpSocket.on("message", async (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
     console.log(`Received data from ${remoteAddr.address}:${remoteAddr.port}`);
     console.log("Received data buffer", data);
 
-    const parsedDnsHeader = dnsHandler.parseDnsHeader(data);
-    const { parsedQuestions, endIndex } = dnsHandler.parseQuestionSection(
-      data,
-      parsedDnsHeader.questionCount ?? -9999
-    );
+    const parsedDnsHeader: DnsHeader = DnsParser.parseDnsHeader(data);
+    const { parsedQuestions }: { parsedQuestions: ParsedQuestion[] } =
+      DnsParser.parseQuestionSection(
+        data,
+        parsedDnsHeader.questionCount ?? -9999
+      );
 
-    const responses = await Promise.all(
-      parsedQuestions.map((question) =>
-        forwardQuestion(parsedDnsHeader, question)
+    const responses: ParsedAnswer[] = await Promise.all(
+      parsedQuestions.map((question: ParsedQuestion) =>
+        forwardQuestionAndCollectAnswer(parsedDnsHeader, question)
       )
     );
 
@@ -34,12 +37,12 @@ udpSocket.on("message", async (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
     }
 
     for (let i = 0; i < parsedDnsHeader.questionCount; i++) {
-      const questionSection = dnsHandler.createQuestionSection(
+      const questionSection: Buffer = DnsWriter.createQuestionSection(
         parsedQuestions[i].domainName,
         "A",
         1
       );
-      const answerSection = dnsHandler.createAnswerSection(
+      const answerSection: Buffer = DnsWriter.createAnswerSection(
         responses.length
           ? responses[i].domainName
           : parsedQuestions[i].domainName,
@@ -59,7 +62,7 @@ udpSocket.on("message", async (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
       ]);
     }
 
-    const header = dnsHandler.createDnsHeader({
+    const header: Buffer = DnsWriter.createDnsHeader({
       isResponse: true,
       packetId: parsedDnsHeader.packetId,
       questionCount: parsedQuestions.length,
@@ -85,13 +88,13 @@ udpSocket.on("message", async (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
   }
 });
 
-async function forwardQuestion(
+async function forwardQuestionAndCollectAnswer(
   parsedHeader: DnsHeader,
   parsedQuestion: ParsedQuestion
 ): Promise<ParsedAnswer> {
   return new Promise((resolve, reject) => {
     const forwarderSocket: dgram.Socket = dgram.createSocket("udp4");
-    const header = dnsHandler.createDnsHeader({
+    const header: Buffer = DnsWriter.createDnsHeader({
       packetId: parsedHeader.packetId,
       isRecursionDesired: true,
       isResponse: false,
@@ -100,12 +103,12 @@ async function forwardQuestion(
       operationCode: 0,
       responseCode: 0,
     });
-    const question = dnsHandler.createQuestionSection(
+    const question: Buffer = DnsWriter.createQuestionSection(
       parsedQuestion.domainName,
       "A",
       1
     );
-    const query = Buffer.concat([
+    const query: Buffer = Buffer.concat([
       new Uint8Array(header),
       new Uint8Array(question),
     ]);
@@ -121,23 +124,24 @@ async function forwardQuestion(
       reject("NO ADDRESS TO FORWARD REQUEST");
     }
 
-    forwarderSocket.on(
-      "message",
-      (data: Buffer, remoteAddr: dgram.RemoteInfo) => {
-        const header = dnsHandler.parseDnsHeader(data);
-        const { parsedQuestions, endIndex } = dnsHandler.parseQuestionSection(
-          data,
-          1
-        );
-        const parsedAnswer = dnsHandler.parseAnswersSection(data, endIndex, 1);
+    forwarderSocket.on("message", (data: Buffer) => {
+      DnsParser.parseDnsHeader(data);
+      const { endIndex }: { endIndex: number } = DnsParser.parseQuestionSection(
+        data,
+        1
+      );
+      const parsedAnswer: ParsedAnswer[] = DnsParser.parseAnswersSection(
+        data,
+        endIndex,
+        1
+      );
 
-        resolve(parsedAnswer[0]);
-        forwarderSocket.close();
-      }
-    );
+      resolve(parsedAnswer[0]);
+      forwarderSocket.close();
+    });
 
     forwarderSocket.on("error", (err) => {
-      console.error("THIS IS THE ERROR: ", err);
+      console.error("Forwarding question error:", err);
       forwarderSocket.close();
       reject();
     });
