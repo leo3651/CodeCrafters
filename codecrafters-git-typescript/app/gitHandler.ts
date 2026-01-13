@@ -213,7 +213,9 @@ export class GitHandler {
     const dir = sha1Hash.slice(0, 2);
     const file = sha1Hash.slice(2);
 
-    fs.mkdirSync(`${basePath}.git/objects/${dir}`, { recursive: true });
+    if (!fs.existsSync(`${basePath}.git/objects/${dir}`)) {
+      fs.mkdirSync(`${basePath}.git/objects/${dir}`, { recursive: true });
+    }
     fs.writeFileSync(`${basePath}.git/objects/${dir}/${file}`, compressedFile);
   }
 
