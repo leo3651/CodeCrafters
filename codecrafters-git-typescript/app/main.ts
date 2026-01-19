@@ -56,7 +56,7 @@ switch (command) {
     console.log(treeObjSha1Hash.toString("hex"));
     break;
 
-  // WRITE TREE
+  // COMMIT
   case Commands.commit:
     const treeSha1Hash: string = args[1];
     const parentCommit: string = args[3];

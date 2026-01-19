@@ -1,7 +1,7 @@
 import { ObjectType } from "./model";
 import crypto from "crypto";
 
-export const REF_SIZE = 20;
+export const REF_SIZE: number = 20;
 
 export function createSha1HexHash(content: Buffer): Buffer {
   return crypto.createHash("sha1").update(new Uint8Array(content)).digest();

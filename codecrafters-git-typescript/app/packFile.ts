@@ -3,7 +3,7 @@ import {
   ObjectType,
   type DecompressedObject,
   type DecompressedZlibContent,
-  type ObjectHeader,
+  type ObjectHeader as PackFileHeader,
 } from "./model";
 import { REF_SIZE } from "./utils";
 import zlib from "node:zlib";
@@ -14,14 +14,14 @@ export class PackFile {
     packObjBuffer: Buffer,
     i: number
   ): Promise<DecompressedObject> {
-    const objHeader: ObjectHeader = this.parseObjectHeader(packObjBuffer, i);
+    const objHeader: PackFileHeader = this.parseHeader(packObjBuffer, i);
     i += objHeader.parsedBytes;
 
     // Delta object
     if (ObjectType.OBJ_REF_DELTA === objHeader.objectType) {
       const deltaRef: Buffer = packObjBuffer.subarray(i, i + REF_SIZE);
       const { objectContent, parsedBytes }: DecompressedZlibContent =
-        await this.decompressPackFileObject(
+        await this.decompress(
           packObjBuffer.subarray(i + REF_SIZE),
           objHeader.objectSize
         );
@@ -36,10 +36,7 @@ export class PackFile {
     // Non delta objects
     else {
       const { objectContent, parsedBytes }: DecompressedZlibContent =
-        await this.decompressPackFileObject(
-          packObjBuffer.subarray(i),
-          objHeader.objectSize
-        );
+        await this.decompress(packObjBuffer.subarray(i), objHeader.objectSize);
       return {
         objectContent,
         parsedBytes: parsedBytes + objHeader.parsedBytes,
@@ -48,7 +45,7 @@ export class PackFile {
     }
   }
 
-  private static parseObjectHeader(buffer: Buffer, i: number): ObjectHeader {
+  private static parseHeader(buffer: Buffer, i: number): PackFileHeader {
     const start: number = i;
     const type: ObjectType = (buffer[i] & 0b01110000) >> 4;
     let size: number = buffer[i] & 0b00001111;
@@ -61,7 +58,7 @@ export class PackFile {
     }
     i++;
 
-    const objHeader: ObjectHeader = {
+    const objHeader: PackFileHeader = {
       objectSize: size,
       objectType: type,
       parsedBytes: i - start,
@@ -70,7 +67,7 @@ export class PackFile {
     return objHeader;
   }
 
-  private static async decompressPackFileObject(
+  private static async decompress(
     compressedData: Buffer,
     objectSize: number
   ): Promise<DecompressedZlibContent> {

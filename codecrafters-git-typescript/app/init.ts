@@ -6,6 +6,7 @@ export class Init {
     fs.mkdirSync(`${basePath}.git/objects`, { recursive: true });
     fs.mkdirSync(`${basePath}.git/refs`, { recursive: true });
     fs.writeFileSync(`${basePath}.git/HEAD`, `ref: refs/heads/main\n`);
+
     console.log(`Initialized git directory`);
   }
 }

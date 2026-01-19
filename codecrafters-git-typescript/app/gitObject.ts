@@ -42,14 +42,14 @@ export class GitObject {
     const length: number = parseInt(header[1]);
     const payload: Buffer = decompressedFileContent.subarray(nullByteIndex + 1);
 
-    return {
-      sha1Hash: Buffer.from(fileSha1Hash, "hex"),
-      sha1HexHash: fileSha1Hash,
-      fileContent: decompressedFileContent,
+    return new GitObjectFile(
+      Buffer.from(fileSha1Hash, "hex"),
+      fileSha1Hash,
+      decompressedFileContent,
       payload,
       type,
-      length,
-    };
+      length
+    );
   }
 
   public static async create(objects: DecompressedObject[]): Promise<{
