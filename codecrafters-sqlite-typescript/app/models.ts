@@ -1,4 +1,4 @@
-export interface DBFileHeader {
+export interface IDBFileHeader {
   "header string": string; // The header string: "SQLite format 3\000"
   "database page size": number; // The database page size in bytes.
   "file format write version": number; // 1 for legacy; 2 for WAL.
@@ -24,7 +24,7 @@ export interface DBFileHeader {
   "sqlite version number": number; // SQLITE_VERSION_NUMBER.
 }
 
-export interface BTreePageHeader {
+export interface IBTreePageHeader {
   "number of tables": number;
   "b-tree page type": number; // One-byte flag at offset 0 indicating the b-tree page type.
   "start of first freeBlock": number; // Two-byte integer at offset 1 indicating the start of the first freeBlock on the page, or zero if none.
@@ -33,9 +33,10 @@ export interface BTreePageHeader {
   "number of fragmented free bytes": number; // One-byte integer at offset 7 representing the number of fragmented free bytes within the cell content area.
   //"right-most pointer": number | null; // Four-byte page number at offset 8, applicable only to interior b-tree pages.
   "right most pointer": number | null;
+  BTreePageHeaderSize: number;
 }
 
-export enum RootPageCellData {
+export enum ERootPageCellData {
   schemaType,
   schemaName,
   schemaTableName,
@@ -43,15 +44,13 @@ export enum RootPageCellData {
   schema,
 }
 
-export interface IndexCell {
-  id: number;
-  indexedValue: string;
-}
-
 export interface TraversedPage {
-  pageHeaderObj: BTreePageHeader & {
-    BTreePageHeaderSize: number;
-  };
+  pageHeaderObj: IBTreePageHeader;
   pageBuffer: Buffer;
   cellPointers: number[];
 }
+
+export type Variant = {
+  result: number;
+  bytesRead: number;
+};

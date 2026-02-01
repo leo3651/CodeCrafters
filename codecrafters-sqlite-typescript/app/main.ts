@@ -1,99 +1,91 @@
-import { SQLiteHandler } from "./sqliteHandler";
+import { Column } from "./column";
+import { DB_HEADER_SIZE } from "./constants";
+import { Headers } from "./headers";
+import { ERootPageCellData } from "./models";
+import { Tables } from "./tables";
 
-const args = process.argv;
-const databaseFilePath: string = args[2];
+const args: string[] = process.argv;
 const command: string = args[3];
-
-const sqliteHandler = new SQLiteHandler(databaseFilePath);
-await sqliteHandler.ensureReady();
 
 // .dbinfo ARG
 if (command === ".dbinfo") {
-  console.log("\nDATABASE HEADER");
-  Object.entries(sqliteHandler.dbHeader).forEach(([key, value]) => {
+  console.log("\nDATABASE HEADER\n");
+  Object.entries(await Headers.getDbHeader()).forEach(([key, value]) => {
     console.log(`${key}: ${value}`);
   });
 
   console.log("\nROOT PAGE HEADER");
-  Object.entries(sqliteHandler.rootPageHeader).forEach(([key, value]) => {
-    console.log(`${key}: ${value}`);
-  });
+  Object.entries(await Headers.getPageHeaderAtOffset(DB_HEADER_SIZE)).forEach(
+    ([key, value]) => {
+      console.log(`${key}: ${value}`);
+    },
+  );
 }
 
 // .tables ARG - prints the names of all tables
 else if (command === ".tables") {
-  console.log(...(await sqliteHandler.getTableNames()));
+  console.log(...(await Tables.getNames()));
 }
 
 // Count rows in the table
 else if (command.toLowerCase().includes("select count(*)")) {
-  const tableName = command.split(" ").at(-1) || "";
+  const tableName: string = command.split(" ").at(-1) || "";
 
-  console.log(await sqliteHandler.getTableRowCount(tableName));
+  console.log(await Tables.getTableRowCount(tableName));
 }
 
 // Select rows from columns
-else if (command.toLowerCase().startsWith("select")) {
+else {
+  const words: string[] = command.replaceAll(",", "").split(" ");
+  const indexOfSelect: number = words
+    .map((word) => word.toLowerCase())
+    .indexOf("select");
+  const indexOfWhere: number = words
+    .map((word) => word.toLowerCase())
+    .indexOf("where");
+  const indexOfFrom: number = words
+    .map((word) => word.toLowerCase())
+    .indexOf("from");
+
+  const columns: string[] = words.slice(indexOfSelect + 1, indexOfFrom);
+  const table: string = words[indexOfFrom + 1];
   let whereColumn: string = "";
-  let whereTerm: string = "";
-  let whereColumnIndex: number = 0;
+  let whereCondition: string = "";
 
-  let [rest, tableName] = command.toLowerCase().split(" from ");
-  const columnNames = rest.toLowerCase().split("select ")[1].split(",");
-
-  if (command.toLowerCase().includes("where")) {
-    const _tableName = tableName.toLowerCase().split("where")[0];
-    whereColumn = tableName.toLowerCase().split("where")[1].split("=")[0];
-    whereTerm = command
-      .split("=")[1]
-      .trim()
-      .slice(1, whereTerm.length - 1);
-    tableName = _tableName;
-    whereColumnIndex = await sqliteHandler.getColumnIndex(
-      tableName,
-      whereColumn
-    );
+  if (indexOfWhere > -1) {
+    whereColumn = words[indexOfWhere + 1];
+    whereCondition = command.split("'")[1];
   }
+  let tableRootPageIndex: number = -1;
+  let indexTableRootPageIndex: number = -1;
 
-  if (!tableName || !columnNames.length) {
-    throw new Error("Invalid query format");
+  const tableRootData: string[] | null = await Tables.getTableRootData(table);
+  if (tableRootData) {
+    tableRootPageIndex =
+      parseInt(tableRootData[ERootPageCellData.schemaRootPage]) - 1;
   }
-
-  const columnData = await sqliteHandler.getTableData(
-    tableName,
+  const indexTableData: string[] | null = await Column.checkForIndexSearch(
+    table,
     whereColumn,
-    whereTerm
+  );
+  if (indexTableData) {
+    indexTableRootPageIndex =
+      Number.parseInt(indexTableData[ERootPageCellData.schemaRootPage]) - 1;
+  }
+  const columnIndices: number[] = await Promise.all(
+    columns.map(async (column) => await Column.getColumnIndex(table, column)),
+  );
+  const whereColumnIndex: number = await Column.getColumnIndex(
+    table,
+    whereColumn,
   );
 
-  if (columnData !== null) {
-    const columnIndexes: number[] = [];
-    for (const columnName of columnNames) {
-      columnIndexes.push(
-        await sqliteHandler.getColumnIndex(tableName, columnName)
-      );
-    }
-
-    for (let j = 0, m = columnData.length; j < m; j++) {
-      let data = "";
-
-      for (let i = 0, n = columnIndexes.length; i < n; i++) {
-        if (!whereColumn) {
-          data += `|${columnData[j][columnIndexes[i]]}`;
-        } else {
-          if (columnData[j][whereColumnIndex] === whereTerm) {
-            data += `|${columnData[j][columnIndexes[i]]}`;
-          }
-        }
-      }
-
-      if (data) {
-        console.log(data.slice(1));
-      }
-    }
-  }
-}
-
-// Handle unknown commands
-else {
-  throw new Error(`Unknown command ${command}`);
+  const rows: string[][] = await Tables.getTableData(
+    tableRootPageIndex,
+    indexTableRootPageIndex,
+    whereColumnIndex,
+    whereCondition,
+    columnIndices,
+  );
+  rows.forEach((row) => console.log(...row));
 }
