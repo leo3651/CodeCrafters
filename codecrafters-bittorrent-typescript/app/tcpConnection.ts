@@ -1,28 +1,26 @@
 import * as net from "net";
 import { generateTorrentInfoHashBuffer } from "./utils";
-
-import type { Torrent } from "./model";
+import type { Torrent, TorrentInfo } from "./model";
 import {
-  createHandshake,
+  createHandshakeBuffer,
   getPiecesLength,
   requestPiece,
   savePieceToFile,
-  sendHandshake,
-  sendInterested,
+  createInterestedBuffer,
 } from "./helperTcpConnection";
 import {
-  createExtensionHandshake,
-  handleExtensionHandshake,
-  handleExtensionMessage,
+  createExtensionHandshakeBuffer,
+  createReqExtMetadataBuffer,
+  parseTorrentInfoFromExt,
 } from "./magnetLinks";
 
-let allCollectedPieces = Buffer.alloc(0);
-let buffer = Buffer.alloc(0);
-let piecesLength: number[] = [];
-let pieceIndex = 0;
-let offset: number = 0;
-let extensionHandshakeReceived: boolean = false;
-let globalPieceIndexToDownload: number | null = null;
+let allCollectedPieces: Buffer = Buffer.alloc(0);
+let collectedData: Buffer = Buffer.alloc(0);
+let piecesLengthArr: number[] = [];
+let pieceIndex: number = 0;
+let pieceBlockOffset: number = 0;
+let requestedExtensionMetadata: boolean = false;
+let singlePieceIndexDownload: number | null = null;
 let globalSaveToFilePath: string | null = null;
 
 export function createTcpConnection(
@@ -32,38 +30,36 @@ export function createTcpConnection(
   saveToFilePath: string | null = null,
   pieceIndexToDownload: number | null = null,
   magnetHandshake: boolean = false,
-  hexHashedInfoFromMagnetLink: string | null = null
-) {
-  globalPieceIndexToDownload = pieceIndexToDownload;
+  hexHashedInfoFromMagnetLink: string | null = null,
+): void {
+  singlePieceIndexDownload = pieceIndexToDownload;
   globalSaveToFilePath = saveToFilePath;
   let torrentInfoHashBuffer: Buffer;
 
   if (torrent) {
     torrentInfoHashBuffer = generateTorrentInfoHashBuffer(torrent.info);
-    piecesLength = getPiecesLength(
+    piecesLengthArr = getPiecesLength(
       torrent.info.length,
-      torrent.info["piece length"]
+      torrent.info["piece length"],
     );
   } else if (hexHashedInfoFromMagnetLink) {
     torrentInfoHashBuffer = Buffer.from(hexHashedInfoFromMagnetLink, "hex");
   }
 
-  const socket = net.createConnection(
+  const socket: net.Socket = net.createConnection(
     { host: peerIp, port: parseInt(peerPort) },
     () => {
-      const handshake = createHandshake(torrentInfoHashBuffer, magnetHandshake);
-      sendHandshake(socket, handshake);
-    }
+      const handshake: Buffer = createHandshakeBuffer(
+        torrentInfoHashBuffer,
+        magnetHandshake,
+      );
+      socket.write(new Uint8Array(handshake));
+    },
   );
 
   socket.on("data", (data) => {
     if (torrent) {
-      handleBitTorrentMessages(
-        data,
-        socket,
-        torrent.info["piece length"],
-        torrent
-      );
+      handleBitTorrentMessages(data, socket, torrent);
     } else {
       handleBitTorrentMessages(data, socket);
     }
@@ -71,113 +67,113 @@ export function createTcpConnection(
 
   socket.on("error", (err) => {
     console.error(err);
+    socket.end();
   });
 }
 
 function handleBitTorrentMessages(
   data: Buffer,
   socket: net.Socket,
-  pieceLen: number | null = null,
-  torrent: Torrent | null = null
-) {
+  torrent: Torrent | null = null,
+): void {
   // Append the new data to the buffer
-  buffer = Buffer.concat([new Uint8Array(buffer), new Uint8Array(data)]);
+  collectedData = Buffer.concat([
+    new Uint8Array(collectedData),
+    new Uint8Array(data),
+  ]);
 
   if (
-    buffer[0] === 19 &&
-    buffer.slice(1, 20).toString() === "BitTorrent protocol"
+    collectedData[0] === 19 &&
+    collectedData.subarray(1, 20).toString() === "BitTorrent protocol"
   ) {
-    const peerId = data.slice(48, 68);
+    collectedData = Buffer.alloc(0);
+
+    const peerId: Buffer = data.subarray(48, 68);
     console.log(`Peer ID: ${peerId.toString("hex")}`);
+
     if (data[25] === 16) {
-      socket.write(createExtensionHandshake());
+      socket.write(createExtensionHandshakeBuffer());
     }
-    buffer = Buffer.alloc(0);
 
     if (torrent) {
-      handleBitTorrentMessages(data.slice(68), socket, pieceLen, torrent);
+      handleBitTorrentMessages(data.subarray(68), socket, torrent);
     } else {
-      handleBitTorrentMessages(data.slice(68), socket);
+      handleBitTorrentMessages(data.subarray(68), socket);
     }
     return;
   }
 
   // Process all complete messages in the buffer
-  while (buffer.length >= 4) {
+  while (collectedData.length >= 4) {
     // Read the message length from the first 4 bytes
-    const messageLen = buffer.readInt32BE(0);
+    const messageLen: number = collectedData.readInt32BE(0);
 
     // Check if the buffer contains the complete message
-    if (buffer.length < messageLen + 4) {
+    if (collectedData.length < messageLen + 4) {
       // If not, wait for more data
       break;
     }
 
     // Extract the complete message
-    const message = buffer.slice(0, messageLen + 4);
-    buffer = buffer.slice(messageLen + 4); // Remove the processed message from the buffer
+    const message: Buffer = collectedData.subarray(0, messageLen + 4);
+    collectedData = collectedData.subarray(messageLen + 4); // Remove the processed message from the buffer
 
-    if (messageLen === 0) {
-      // Keep-alive message
-      continue;
-    }
-
-    const messageId = message.readUInt8(4);
+    const messageId: number = message.readUInt8(4);
 
     // UNCHOKE MESSAGE
     if (messageId === 1) {
       console.log("Received unchoke message");
-      if (globalPieceIndexToDownload !== null) {
-        pieceLen = piecesLength[globalPieceIndexToDownload];
-        requestPiece(socket, pieceLen, globalPieceIndexToDownload);
+
+      if (singlePieceIndexDownload !== null) {
+        requestPiece(
+          socket,
+          piecesLengthArr[singlePieceIndexDownload],
+          singlePieceIndexDownload,
+        );
       } else {
-        if (piecesLength[pieceIndex]) {
-          requestPiece(socket, piecesLength[pieceIndex], pieceIndex);
-        }
+        requestPiece(socket, piecesLengthArr[pieceIndex], pieceIndex);
       }
     }
 
     // BITFIELD MESSAGE
     else if (messageId === 5) {
       console.log("Received bitfield message");
+
       if (torrent) {
-        sendInterested(socket);
+        socket.write(createInterestedBuffer());
+        console.log("Send interested message");
       }
     }
 
     // PIECE BLOCK MESSAGE
     else if (messageId === 7) {
       console.log("Received block piece message");
-      const blockData = message.slice(13);
-      offset += blockData.length;
+
+      const pieceBlockData: Buffer = message.subarray(13);
+      pieceBlockOffset += pieceBlockData.length;
 
       allCollectedPieces = Buffer.concat([
         new Uint8Array(allCollectedPieces),
-        new Uint8Array(blockData),
+        new Uint8Array(pieceBlockData),
       ]);
 
       if (
-        globalPieceIndexToDownload !== null &&
-        globalSaveToFilePath &&
-        offset === piecesLength[globalPieceIndexToDownload]
+        singlePieceIndexDownload !== null &&
+        pieceBlockOffset === piecesLengthArr[singlePieceIndexDownload]
       ) {
-        savePieceToFile(allCollectedPieces, globalSaveToFilePath);
+        savePieceToFile(allCollectedPieces, globalSaveToFilePath!);
         socket.end();
         return;
-      }
-
-      if (offset === piecesLength[pieceIndex]) {
-        offset = 0;
-        if (globalPieceIndexToDownload === null && globalSaveToFilePath) {
+      } else {
+        if (pieceBlockOffset === piecesLengthArr[pieceIndex]) {
+          pieceBlockOffset = 0;
           pieceIndex++;
-          pieceLen = piecesLength[pieceIndex];
 
-          if (pieceIndex < piecesLength.length) {
-            requestPiece(socket, pieceLen, pieceIndex);
+          if (pieceIndex < piecesLengthArr.length) {
+            requestPiece(socket, piecesLengthArr[pieceIndex], pieceIndex);
           } else {
-            if (globalSaveToFilePath) {
-              savePieceToFile(allCollectedPieces, globalSaveToFilePath);
-            }
+            savePieceToFile(allCollectedPieces, globalSaveToFilePath!);
+
             socket.end();
           }
         }
@@ -187,21 +183,33 @@ function handleBitTorrentMessages(
     // EXTENSION HANDSHAKE
     else if (messageId === 20) {
       console.log("Received extension message");
-      if (!extensionHandshakeReceived) {
-        handleExtensionHandshake(message, socket);
-        extensionHandshakeReceived = true;
-      } else {
-        const torrentInfo = handleExtensionMessage(message, socket);
-        piecesLength = getPiecesLength(
+
+      if (!requestedExtensionMetadata) {
+        socket.write(createReqExtMetadataBuffer(message));
+        requestedExtensionMetadata = true;
+
+        if (process.argv[2] === "magnet_handshake") {
+          socket.end();
+        }
+      }
+
+      // ext handshake received
+      else {
+        const torrentInfo: TorrentInfo = parseTorrentInfoFromExt(message);
+        piecesLengthArr = getPiecesLength(
           torrentInfo.length,
-          torrentInfo["piece length"]
+          torrentInfo["piece length"],
         );
 
         if (
           process.argv[2] === "magnet_download_piece" ||
           process.argv[2] === "magnet_download"
         ) {
-          sendInterested(socket);
+          socket.write(createInterestedBuffer());
+        }
+
+        if (process.argv[2] === "magnet_info") {
+          socket.end();
         }
       }
     }

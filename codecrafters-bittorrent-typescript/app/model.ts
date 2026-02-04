@@ -1,27 +1,23 @@
-export type BencodedValue =
-  | string
-  | number
-  | DecodedDict
-  | BencodedValue[]
-  | Torrent;
+export type IDecodedValue = string | number | DecodedDict | IDecodedValue[];
 
 export interface DecodedDict {
-  [key: string]: BencodedValue;
+  [key: string]: IDecodedValue;
 }
 
-export interface Torrent {
+export interface Torrent extends DecodedDict {
   announce: string;
   "created by": string;
   info: TorrentInfo;
 }
-export interface TorrentInfo {
+
+export interface TorrentInfo extends DecodedDict {
   length: number;
   name: string;
   "piece length": number;
   pieces: string;
 }
 
-export interface ParamsDiscoverPeers {
+export interface IDiscoverPeersParams {
   peer_id: string;
   port: number;
   uploaded: number;

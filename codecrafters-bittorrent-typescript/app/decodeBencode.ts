@@ -1,15 +1,18 @@
-import type { BencodedValue, DecodedDict } from "./model";
+import type { IDecodedValue, DecodedDict } from "./model";
 
-export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
-  // This function is used to decode a bencoded string
-
+/**
+ * @description used for decoding bencoded string
+ */
+export function decodeBencode(bencodedValue: string): [IDecodedValue, number] {
   // Decode string
   if (!isNaN(parseInt(bencodedValue[0]))) {
-    const firstColonIndex = bencodedValue.indexOf(":");
+    const firstColonIndex: number = bencodedValue.indexOf(":");
     if (firstColonIndex === -1) {
       throw new Error("Invalid encoded value");
     }
-    const stringLen = parseInt(bencodedValue.split(":")[0]);
+
+    const stringLen: number = parseInt(bencodedValue.split(":")[0]);
+
     return [
       bencodedValue.slice(firstColonIndex + 1, firstColonIndex + 1 + stringLen),
       firstColonIndex + 1 + stringLen,
@@ -18,7 +21,8 @@ export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
 
   // Decode int
   else if (bencodedValue[0] === "i") {
-    const firstEIndex = bencodedValue.indexOf("e");
+    const firstEIndex: number = bencodedValue.indexOf("e");
+
     return [
       Number.parseFloat(bencodedValue.slice(1, firstEIndex)),
       firstEIndex + 1,
@@ -27,16 +31,18 @@ export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
 
   // Decode bencoded list
   else if (bencodedValue[0] === "l") {
-    let offset = 1;
-    let decodedArr: BencodedValue = [];
+    let offset: number = 1;
+    let decodedArr: IDecodedValue[] = [];
 
     while (offset < bencodedValue.length) {
       if (bencodedValue[offset] === "e") {
         break;
       }
-      const [decodedVal, encodedLen] = decodeBencode(
-        bencodedValue.slice(offset)
+
+      const [decodedVal, encodedLen]: [IDecodedValue, number] = decodeBencode(
+        bencodedValue.slice(offset),
       );
+
       decodedArr.push(decodedVal);
       offset += encodedLen;
     }
@@ -46,7 +52,7 @@ export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
 
   // Decode bencoded dict
   else if (bencodedValue[0] === "d") {
-    let offset = 1;
+    let offset: number = 1;
     let decodedDict: DecodedDict = {};
 
     while (offset < bencodedValue.length) {
@@ -54,20 +60,22 @@ export function decodeBencode(bencodedValue: string): [BencodedValue, number] {
         break;
       }
 
-      const [decodedKey, encodedKeyLen] = decodeBencode(
-        bencodedValue.slice(offset)
-      );
+      const [decodedKey, encodedKeyLen]: [IDecodedValue, number] =
+        decodeBencode(bencodedValue.slice(offset));
       offset += encodedKeyLen;
-      const [decodedValue, encodedValueLen] = decodeBencode(
-        bencodedValue.slice(offset)
-      );
+
+      const [decodedValue, encodedValueLen]: [IDecodedValue, number] =
+        decodeBencode(bencodedValue.slice(offset));
       offset += encodedValueLen;
 
       decodedDict[decodedKey as string] = decodedValue;
     }
 
     return [decodedDict, offset + 1];
-  } else {
+  }
+
+  // Unsupported type
+  else {
     throw new Error("Unsupported type");
   }
 }
