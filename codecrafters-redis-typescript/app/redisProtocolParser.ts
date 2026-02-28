@@ -1,11 +1,17 @@
 class RedisProtocolParser {
-  public readRedisProtocol(data: string): string[][] {
-    let i = 0;
+  public readCommand(data: string): string[][] {
+    let i: number = 0;
     const decodedData: string[][] = [];
 
     try {
       while (i < data.length - 1) {
-        const { newDecodedData, newIndex } = this.redisProtocolParser(data, i);
+        const {
+          newDecodedData,
+          newIndex,
+        }: {
+          newDecodedData: string[];
+          newIndex: number;
+        } = this.parseRedisProtocol(data, i);
         decodedData.push(newDecodedData);
         i = newIndex;
       }
@@ -17,36 +23,36 @@ class RedisProtocolParser {
     }
   }
 
-  private redisProtocolParser(
+  private parseRedisProtocol(
     data: string,
-    i: number
+    i: number,
   ): { newDecodedData: string[]; newIndex: number } {
     const decodedData: string[] = [];
 
     while (i < data.length - 1) {
-      const type = data[i];
+      const type: string = data[i];
 
       // Resp array
       if (type === "*") {
         i++;
-        const start = i;
+        const start: number = i;
         while (data[i] !== "\r") {
           i++;
-
           if (i >= data.length) {
             throw new Error("Invalid Resp array");
           }
         }
 
-        const size = data.slice(start, i);
+        const size: string = data.slice(start, i);
         i += size.length;
         i++;
 
         for (let j = 0; j < Number.parseInt(size); j++) {
-          const { newDecodedData, newIndex } = this.redisProtocolParser(
-            data,
-            i
-          );
+          const {
+            newDecodedData,
+            newIndex,
+          }: { newDecodedData: string[]; newIndex: number } =
+            this.parseRedisProtocol(data, i);
           decodedData.push(...newDecodedData);
           i = newIndex;
         }
@@ -56,7 +62,8 @@ class RedisProtocolParser {
 
       // Bulk string
       else if (type === "$") {
-        const { word, i: newIndex } = this.readRedisProtocolLine(data, i);
+        const { word, i: newIndex }: { word: string; i: number } =
+          this.parseRedisProtocolLine(data, i);
         i = newIndex;
         decodedData.push(word);
         return { newDecodedData: decodedData, newIndex: i };
@@ -65,14 +72,13 @@ class RedisProtocolParser {
       // Simple string
       else if (type === "+") {
         i++;
-        const nextCRLF = "\r\n";
-        const endOfString = data.indexOf(nextCRLF, i);
-
+        const nextCRLF: string = "\r\n";
+        const endOfString: number = data.indexOf(nextCRLF, i);
         if (endOfString === -1) {
           throw new Error("Invalid simple string");
         }
 
-        const word = data.slice(i, endOfString);
+        const word: string = data.slice(i, endOfString);
         i += word.length + 2;
         decodedData.push(word);
         return { newDecodedData: decodedData, newIndex: i };
@@ -84,27 +90,26 @@ class RedisProtocolParser {
     throw new Error("Could not parse correctly");
   }
 
-  private readRedisProtocolLine(
+  private parseRedisProtocolLine(
     data: string,
-    i: number
+    i: number,
   ): { word: string; i: number } {
     i++;
 
-    const firstCRLFIndex = data.indexOf("\r\n", i);
-
+    const firstCRLFIndex: number = data.indexOf("\r\n", i);
     if (firstCRLFIndex === -1) {
       throw new Error("Invalid frame");
     }
 
-    const lengthAsStr = data.slice(i, firstCRLFIndex);
-    const len = Number.parseInt(lengthAsStr);
+    const wordLengthAsStr: string = data.slice(i, firstCRLFIndex);
+    const wordLength: number = Number.parseInt(wordLengthAsStr);
 
-    i += lengthAsStr.length;
+    i += wordLengthAsStr.length;
     i += 2;
 
-    const word = data.slice(i, i + len);
+    const word: string = data.slice(i, i + wordLength);
 
-    i += len;
+    i += wordLength;
 
     if (data[i] === "\r") {
       i += 2;
@@ -114,5 +119,5 @@ class RedisProtocolParser {
   }
 }
 
-const redisProtocolParser = new RedisProtocolParser();
+const redisProtocolParser: RedisProtocolParser = new RedisProtocolParser();
 export { redisProtocolParser };

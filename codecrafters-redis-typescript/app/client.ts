@@ -1,24 +1,52 @@
 import * as net from "net";
+import { redisProtocolEncoder } from "./redisProtocolEncoder";
+import { redisCommandHandler } from "./redisCommandHandler";
+import { redisProtocolParser } from "./redisProtocolParser";
+import { socketsInfo } from "./socketsInfo";
 
-console.log(Buffer.from("123").toString());
-// Create a TCP client
-const client: net.Socket = net.createConnection(
-  { host: "127.0.0.1", port: 6379 },
-  () => {
-    console.log("Connected to server");
-    // Send something
-    client.write("Hello from client!");
-  }
-);
+export function createClient(
+  host: string,
+  hostPort: number,
+  localPort: number,
+): void {
+  let data: Buffer = Buffer.alloc(0);
 
-// Listen for server responses
-client.on("data", (data) => {
-  console.log("Received from server:", data.toString());
-});
+  const socket: net.Socket = net.createConnection(
+    { host, port: hostPort, localPort },
+    () => {
+      console.log(`CLIENT connected to host: ${host} at port: ${hostPort}`);
 
-// Handle disconnection
-client.on("end", () => {
-  console.log("Disconnected from server");
-});
+      socket.write(redisProtocolEncoder.encodeRespArr(["PING"]));
 
-("+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0\r\n$88\r\nREDIS0011ú   redis-ver\u00057.2.0ú\nredis-bitsÀ@ú\u0005ctimeÂ¼eused-memÂ°Ä\u0010aof-baseÀÿðn;þÀÿZ¢*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n");
+      socketsInfo.add(socket);
+    },
+  );
+
+  // Listen for server
+  socket.on("data", (chunkOfData: Buffer) => {
+    data = Buffer.concat([data, chunkOfData]);
+    try {
+      const decodedData: string[][] = redisProtocolParser.readCommand(
+        data.toString("binary"),
+      );
+
+      console.log(
+        `Received DATA from MASTER server: "${JSON.stringify(data.toString())}"`,
+      );
+      console.log("decodedData", decodedData);
+      data = Buffer.alloc(0);
+
+      (socket as any).manualLocalPort = localPort;
+      redisCommandHandler.processCommands(decodedData, socket);
+    } catch (err) {
+      console.log(err);
+      return;
+    }
+  });
+
+  // Handle disconnection
+  socket.on("end", () => {
+    console.log("Disconnected from server");
+    socketsInfo.remove(socket);
+  });
+}

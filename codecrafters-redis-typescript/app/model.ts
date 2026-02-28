@@ -9,6 +9,12 @@ export enum EOpCode {
   AUX = 0xfa,
 }
 
+export enum EExecutionType {
+  Multi,
+  Exec,
+  Regular,
+}
+
 export interface IInfo {
   role: string;
   master_replid: string;
@@ -20,15 +26,13 @@ export interface ISocketInfo {
   propagatedBytes: number;
   processedBytes: number;
   numberOfResponses: number;
-  isMulti: boolean;
   queuedCommands: string[][];
   queuedReplies: Reply[];
   isReplica: boolean;
-  isExec: boolean;
+  executionType: EExecutionType;
 }
 
 export type Reply = Buffer | string;
 
-export type IStream = [string, IStreamEntry[]];
-
-export type IStreamEntry = [string, string[]];
+export type TStream = [string, TStreamEntry[]];
+export type TStreamEntry = [string, string[]];

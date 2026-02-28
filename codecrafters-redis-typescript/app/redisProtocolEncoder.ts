@@ -1,6 +1,10 @@
 class RedisProtocolEncoder {
-  public encodeBulkString(data: string): string {
-    return `$${data.length}\r\n${data}\r\n`;
+  public encodeBulkString(data: string | undefined): string {
+    if (data) {
+      return `$${data.length}\r\n${data}\r\n`;
+    } else {
+      return this.encodeNullBulkString();
+    }
   }
 
   public encodeSimpleString(data: string): string {
@@ -11,26 +15,20 @@ class RedisProtocolEncoder {
     return `-${data}\r\n`;
   }
 
-  public nullBulkString(): string {
+  public encodeNullBulkString(): string {
     return "$-1\r\n";
+  }
+
+  public encodeNullArr(): string {
+    return "*-1\r\n";
   }
 
   public encodeNumber(data: string): string {
     return `:${data}\r\n`;
   }
 
-  public encodeArrWithBulkStrings(strArr: string[]): string {
-    let output = `*${strArr.length}\r\n`;
-    for (let i = 0; i < strArr.length; i++) {
-      output += this.encodeBulkString(strArr[i]);
-    }
-
-    return output;
-  }
-
   public encodeRespArr(arr: any[]): string {
-    let finalString = "";
-    finalString += `*${arr.length}\r\n`;
+    let finalString: string = `*${arr.length}\r\n`;
 
     for (let i = 0; i < arr.length; i++) {
       if (Array.isArray(arr[i])) {
@@ -44,5 +42,5 @@ class RedisProtocolEncoder {
   }
 }
 
-const redisProtocolEncoder = new RedisProtocolEncoder();
+const redisProtocolEncoder: RedisProtocolEncoder = new RedisProtocolEncoder();
 export { redisProtocolEncoder };

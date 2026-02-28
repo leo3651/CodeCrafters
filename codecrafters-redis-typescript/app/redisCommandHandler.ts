@@ -1,690 +1,235 @@
 import * as net from "net";
-import type { IInfo, ISocketInfo, IStream } from "./model";
 import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import { rdbFileParser } from "./rdbFileParser";
-import { streamHandler } from "./stream";
+import { redisFile } from "./redisFile";
+import { socketsInfo } from "./socketsInfo";
+import { type ISocketInfo } from "./model";
+import { Response } from "./response";
+import { streams } from "./streams";
+import { Dictionary } from "./dictionary";
+import { Wait } from "./wait";
+import { Type } from "./type";
+import { InfoGenerator } from "./infoGenerator";
+import { Transactions } from "./transactions";
+import { list } from "./list";
 
 class RedisCommandHandler {
-  public info: IInfo = {
-    role: "master",
-    master_repl_offset: 0,
-    master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
-  };
+  public processCommands(commands: string[][], socket: net.Socket): void {
+    for (const command of commands) {
+      this.processCommand(command, socket);
+    }
+  }
 
-  public STORED_KEY_VAL_PAIRS: { [key: string]: string } = {};
-
-  private clientSockets: ISocketInfo[] = [];
-  private postponedCommands: string[][] = [];
-
-  constructor() {}
-
-  async handleRedisCommand(
-    decodedData: string[][],
-    socket: net.Socket,
-    masterReplies: boolean,
-    port: number
-  ): Promise<void> {
-    this.addSocketIfNeeded(socket);
-    for (let i = 0; i < decodedData.length; i++) {
-      const isMultiCommand = this.handleMultiCommand(socket, decodedData[i]);
-      if (isMultiCommand) {
-        continue;
-      }
-
-      let propagatedCommand = false;
-
-      switch (decodedData[i][0].toLowerCase()) {
+  private processCommand(command: string[], socket: net.Socket): void {
+    if (Transactions.cmdRanUnderMulti(socket, command)) {
+      Transactions.queueCommand(socket, command);
+    } else {
+      switch (command[0].toLowerCase()) {
         case "echo":
-          const arg = decodedData[i][1];
-          this.handleResponse(
-            socket,
-            redisProtocolEncoder.encodeBulkString(arg)
-          );
-
+          const echo: string = command[1];
+          Response.handle(socket, redisProtocolEncoder.encodeBulkString(echo));
           break;
 
         case "ping":
-          if (masterReplies) {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeBulkString("PONG")
-            );
-          }
-          if (!masterReplies) {
-            propagatedCommand = true;
-          }
-
-          break;
-
-        case "ok":
-          const socketInfo = this.getSocketInfo(socket);
-
-          socketInfo.numberOfResponses++;
-          if (socketInfo.numberOfResponses === 2) {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeArrWithBulkStrings([
-                "PSYNC",
-                "?",
-                "-1",
-              ])
-            );
-          }
-
-          break;
-
-        case "pong":
-          this.handleResponse(
+          Response.handle(
             socket,
-            redisProtocolEncoder.encodeArrWithBulkStrings([
-              "REPLCONF",
-              "listening-port",
-              `${port}`,
-            ])
+            redisProtocolEncoder.encodeSimpleString("PONG"),
           );
-          this.handleResponse(
-            socket,
-            redisProtocolEncoder.encodeArrWithBulkStrings([
-              "REPLCONF",
-              "capa",
-              "psync2",
-            ])
-          );
-
           break;
 
         case "set":
-          const key = decodedData[i][1];
-          const val = decodedData[i][2];
-          this.STORED_KEY_VAL_PAIRS[key] = val;
-
-          // Handle expiry
-          if (masterReplies) {
-            if (decodedData[i][3]?.toLowerCase() === "px") {
-              const expiryTime = Number.parseInt(decodedData[i][4]);
-
-              setTimeout(() => {
-                delete this.STORED_KEY_VAL_PAIRS[key];
-              }, expiryTime);
-            }
-
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeSimpleString("OK")
-            );
-
-            this.propagateCommand(decodedData[i]);
-          } else {
-            propagatedCommand = true;
-          }
-
+          Dictionary.set(command);
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeSimpleString("OK"),
+          );
           break;
 
         case "get":
-          if (
-            this.STORED_KEY_VAL_PAIRS[decodedData[i][1]] ||
-            rdbFileParser.KEY_VAL_WITHOUT_EXPIRY[decodedData[i][1]] ||
-            rdbFileParser.KEY_VAL_WITH_EXPIRY[decodedData[i][1]]
-          ) {
-            const value =
-              this.STORED_KEY_VAL_PAIRS[decodedData[i][1]] ||
-              rdbFileParser.KEY_VAL_WITHOUT_EXPIRY[decodedData[i][1]] ||
-              rdbFileParser.KEY_VAL_WITH_EXPIRY[decodedData[i][1]];
-
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeBulkString(value)
-            );
-          } else {
-            this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
-          }
-
-          break;
-
-        case "incr":
-          {
-            const key = decodedData[i][1];
-            let value = this.STORED_KEY_VAL_PAIRS[key];
-
-            if (value) {
-              let numberValue = +value;
-              if (Number.isNaN(numberValue)) {
-                this.handleResponse(
-                  socket,
-                  redisProtocolEncoder.encodeSimpleError(
-                    "ERR value is not an integer or out of range"
-                  )
-                );
-                break;
-              } else {
-                numberValue++;
-                this.STORED_KEY_VAL_PAIRS[key] = numberValue.toString();
-              }
-            } else {
-              this.STORED_KEY_VAL_PAIRS[key] = "1";
-            }
-
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeNumber(this.STORED_KEY_VAL_PAIRS[key])
-            );
-          }
-          break;
-
-        case "config":
-          if (decodedData[i][1]?.toLowerCase() === "get") {
-            if (decodedData[i][2] === "dir") {
-              this.handleResponse(
-                socket,
-                redisProtocolEncoder.encodeArrWithBulkStrings([
-                  "dir",
-                  rdbFileParser.dir,
-                ])
-              );
-            } else if (decodedData[i][2] === "dbfilename") {
-              this.handleResponse(
-                socket,
-                redisProtocolEncoder.encodeArrWithBulkStrings([
-                  "dbfilename",
-                  rdbFileParser.dbFileName,
-                ])
-              );
-            } else {
-              throw new Error("Wrong CONFIG command");
-            }
-          } else {
-            throw new Error("Unhandled CONFIG req");
-          }
-
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeBulkString(Dictionary.get(command)),
+          );
           break;
 
         case "keys":
-          if (decodedData[i][1] === "*") {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeArrWithBulkStrings([
-                ...Object.keys(rdbFileParser.KEY_VAL_WITHOUT_EXPIRY),
-                ...Object.keys(rdbFileParser.KEY_VAL_WITH_EXPIRY),
-              ])
-            );
-          } else {
-            throw new Error("Unsupported keys arg");
-          }
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeRespArr(Dictionary.keys(command)),
+          );
+          break;
+
+        case "config":
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeRespArr([
+              command[2],
+              command[2] === "dir" ? redisFile.dir : redisFile.dbFileName,
+            ]),
+          );
 
           break;
 
         case "info":
-          if (decodedData[i][1] === "replication") {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeBulkString(this.createStringFromInfo())
-            );
-          } else {
-            throw new Error("Unhandled info argument");
-          }
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeBulkString(InfoGenerator.generate()),
+          );
+          break;
 
+        case "pong":
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeRespArr([
+              "REPLCONF",
+              "listening-port",
+              `${(socket as any).manualLocalPort}`,
+            ]),
+          );
+          Response.handle(
+            socket,
+            redisProtocolEncoder.encodeRespArr(["REPLCONF", "capa", "psync2"]),
+          );
+          break;
+
+        case "ok":
+          socketsInfo.getInfo(socket).numberOfResponses++;
+
+          if (socketsInfo.getInfo(socket).numberOfResponses === 2) {
+            Response.handle(
+              socket,
+              redisProtocolEncoder.encodeRespArr(["PSYNC", "?", "-1"]),
+            );
+            socketsInfo.getInfo(socket).isReplica = true;
+          }
           break;
 
         case "replconf":
-          if (decodedData[i][1] === "ACK") {
-            const socketInfo = this.getSocketInfo(socket);
-
-            socketInfo.processedBytes = Number.parseInt(decodedData[i][2]);
-            socketInfo.propagatedBytes +=
-              redisProtocolEncoder.encodeArrWithBulkStrings([
+          if (command[1] === "GETACK") {
+            Response.handle(
+              socket,
+              redisProtocolEncoder.encodeRespArr([
+                "REPLCONF",
+                "ACK",
+                `${socketsInfo.getInfo(socket).processedBytes}`,
+              ]),
+            );
+          } else if (command[1] === "ACK") {
+            socketsInfo.getInfo(socket).processedBytes = Number.parseInt(
+              command[2],
+            );
+            socketsInfo.getInfo(socket).propagatedBytes +=
+              redisProtocolEncoder.encodeRespArr([
                 "REPLCONF",
                 "GETACK",
                 "*",
               ]).length;
-          } else if (decodedData[i][1] === "GETACK") {
-            const socketInfo = this.getSocketInfo(socket);
-
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeArrWithBulkStrings([
-                "REPLCONF",
-                "ACK",
-                `${socketInfo.processedBytes}`,
-              ])
-            );
-            propagatedCommand = true;
           } else {
-            this.handleResponse(
+            Response.handle(
               socket,
-              redisProtocolEncoder.encodeSimpleString("OK")
+              redisProtocolEncoder.encodeSimpleString("OK"),
             );
           }
-
           break;
 
         case "psync":
-          this.handleResponse(
+          Response.handle(
             socket,
             redisProtocolEncoder.encodeSimpleString(
-              `FULLRESYNC ${this.info.master_replid} ${this.info.master_repl_offset}`
-            )
+              `FULLRESYNC ${InfoGenerator.info.master_replid} ${InfoGenerator.info.master_repl_offset}`,
+            ),
           );
-
-          // Send empty RDB file
-          const buf = Buffer.from(rdbFileParser.EMPTY_RDB_FILE_HEX, "hex");
-          const finalBuf = Buffer.concat([
-            Buffer.from(`$${buf.length}\r\n`),
-            buf,
-          ]);
-          this.handleResponse(socket, finalBuf);
-
-          this.getSocketInfo(socket).isReplica = true;
+          Response.handle(socket, redisFile.getEmptyRdbFileBuffer());
+          socketsInfo.getInfo(socket).isReplica = true;
 
           break;
 
         case "wait":
-          await new Promise((resolve) => {
-            const numOfAckReplicasNeeded = Number.parseInt(decodedData[i][1]);
-            const expireTime = Number.parseInt(decodedData[i][2]);
-
-            const askForACKInterval = setInterval(() => {
-              this.clientSockets
-                .filter((sockInfo) => sockInfo.isReplica)
-                .forEach((socketInfo) => {
-                  const respEncodedCommand =
-                    redisProtocolEncoder.encodeArrWithBulkStrings([
-                      "REPLCONF",
-                      "GETACK",
-                      "*",
-                    ]);
-                  this.handleResponse(socketInfo.socket, respEncodedCommand);
-                });
-            }, 20);
-
-            const checkIfWaitResolvedInterval = setInterval(() => {
-              const numOfAckReplicas = this.clientSockets
-                .filter((sockInfo) => sockInfo.isReplica)
-                .filter(
-                  (socketInfo) =>
-                    socketInfo.propagatedBytes === socketInfo.processedBytes ||
-                    socketInfo.processedBytes + 37 ===
-                      socketInfo.propagatedBytes
-                ).length;
-              if (numOfAckReplicas >= numOfAckReplicasNeeded) {
-                clearInterval(checkIfWaitResolvedInterval);
-                clearInterval(askForACKInterval);
-                clearTimeout(resolveTimeout);
-                resolve(
-                  this.handleResponse(socket, `:${numOfAckReplicas}\r\n`)
-                );
-              }
-            }, 10);
-
-            const resolveTimeout = setTimeout(() => {
-              clearInterval(checkIfWaitResolvedInterval);
-              clearInterval(askForACKInterval);
-              clearTimeout(resolveTimeout);
-
-              const numOfAckReplicas = this.clientSockets
-                .filter((sockInfo) => sockInfo.isReplica)
-                .filter(
-                  (socketInfo) =>
-                    socketInfo.propagatedBytes === socketInfo.processedBytes ||
-                    socketInfo.processedBytes + 37 ===
-                      socketInfo.propagatedBytes
-                ).length;
-              this.clientSockets
-                .filter((sockInfo) => sockInfo.isReplica)
-                .forEach((socketInfo) => {
-                  console.log(
-                    `${socketInfo.propagatedBytes}/${socketInfo.processedBytes}`
-                  );
-                });
-
-              resolve(this.handleResponse(socket, `:${numOfAckReplicas}\r\n`));
-            }, expireTime);
-          });
-
+          Wait.exe(socket, command);
           break;
 
         case "type":
-          {
-            const key = decodedData[i][1];
-            const value = this.STORED_KEY_VAL_PAIRS[key];
-            const stream = streamHandler.getStream(key);
-
-            if (value) {
-              this.handleResponse(
-                socket,
-                redisProtocolEncoder.encodeSimpleString(typeof value)
-              );
-            } else if (stream) {
-              this.handleResponse(
-                socket,
-                redisProtocolEncoder.encodeSimpleString("stream")
-              );
-            } else {
-              this.handleResponse(
-                socket,
-                redisProtocolEncoder.encodeSimpleString("none")
-              );
-            }
-          }
+          Type.exe(socket, command);
           break;
 
         case "xadd":
-          const streamKey = decodedData[i][1];
-          let streamID = decodedData[i][2];
-
-          let isAutoGenerated = false;
-
-          if (streamID === "*") {
-            streamID = streamHandler.createStreamID(streamKey);
-            isAutoGenerated = true;
-          }
-
-          const error = streamHandler.checkStreamValidity(
-            streamID,
-            streamKey,
-            !!decodedData[i][3]
-          );
-          if (error) {
-            this.handleResponse(socket, error);
-            break;
-          }
-
-          const [streamIDMilliSecondsTime, sequenceNumber] =
-            streamHandler.parseStreamID(streamID, streamKey);
-          streamID = `${streamIDMilliSecondsTime}-${sequenceNumber}`;
-
-          streamHandler.addStream(streamKey, [
-            streamID,
-            [...decodedData[i].slice(3)],
-          ]);
-
-          if (isAutoGenerated) {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeBulkString(streamID)
-            );
-          } else {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeSimpleString(streamID)
-            );
-          }
-
-          this.postponedCommands.pop();
-          streamHandler.newEntry = true;
-
+          streams.xAdd(socket, command);
           break;
 
         case "xrange":
-          {
-            const streamKey = decodedData[i][1];
-            const streamIDStart = decodedData[i][2];
-            const streamIDEnd = decodedData[i][3];
-
-            const responseArr = streamHandler.xRange(
-              streamKey,
-              streamIDStart,
-              streamIDEnd
-            );
-
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeRespArr(responseArr)
-            );
-          }
-
+          streams.xRange(socket, command);
           break;
 
         case "xread":
-          const streams = decodedData[i].slice(
-            decodedData[i].indexOf("streams") + 1
-          );
-          const boundary = streams.length / 2;
-          const streamsKeys = streams.slice(0, boundary);
-          const streamsIDs = streams.slice(boundary, streams.length);
-
-          console.log(streamsKeys);
-          console.log(streamsIDs);
-
-          if (decodedData[i][1] === "block") {
-            const timeout = Number.parseInt(decodedData[i][2]);
-
-            if (timeout === 0) {
-              this.postponedCommands.unshift(decodedData[i]);
-              await this.blockThread(streamsKeys[0], streamsIDs[0], socket);
-            } else {
-              this.delayResponse(
-                streamsKeys[0],
-                streamsIDs[0],
-                socket,
-                timeout
-              );
-            }
-          } else {
-            const responseArr: IStream[] = [];
-
-            streamsKeys.forEach((sKey, i) => {
-              responseArr.push(streamHandler.readStream(sKey, streamsIDs[i]));
-            });
-
-            console.log("READ RESPONSE: ", responseArr);
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeRespArr(responseArr)
-            );
-          }
-
+          streams.xRead(socket, command);
           break;
 
-        case "multi": {
-          this.handleResponse(
-            socket,
-            redisProtocolEncoder.encodeSimpleString("OK")
-          );
-
-          this.getSocketInfo(socket).isMulti = true;
-
+        case "incr":
+          Dictionary.incr(socket, command);
           break;
-        }
+
+        case "multi":
+          Transactions.multi(socket);
+          break;
 
         case "exec":
-          if (!this.getSocketInfo(socket).isMulti) {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeSimpleError("ERR EXEC without MULTI")
-            );
-          } else {
-            this.getSocketInfo(socket).isMulti = false;
-            this.getSocketInfo(socket).isExec = true;
-
-            await this.handleRedisCommand(
-              this.getSocketInfo(socket).queuedCommands,
-              socket,
-              masterReplies,
-              port
-            );
-
-            this.getSocketInfo(socket).isExec = false;
-
-            this.handleResponse(
-              socket,
-              `*${
-                this.getSocketInfo(socket).queuedReplies.length
-              }\r\n${this.getSocketInfo(socket).queuedReplies.join("")}`
-            );
-          }
+          Transactions.exec(socket, this.processCommand.bind(this));
           break;
 
-        case "discard": {
-          const socketInfo = this.getSocketInfo(socket);
-
-          if (socketInfo.isMulti) {
-            socketInfo.queuedCommands = [];
-            socketInfo.isMulti = false;
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeSimpleString("OK")
-            );
-          } else {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeSimpleError(
-                "ERR DISCARD without MULTI"
-              )
-            );
-          }
+        case "discard":
+          Transactions.discard(socket);
           break;
-        }
+
+        case "rpush":
+          list.rPush(socket, command);
+          break;
 
         default:
           if (
-            decodedData[i][0].startsWith("FULLRESYNC") ||
-            decodedData[i][0].startsWith("REDIS0011")
+            command[0].startsWith("FULLRESYNC") ||
+            command[0].startsWith("REDIS0011")
           ) {
           } else {
-            throw new Error(`Unhandled REDIS command ${decodedData[i]}`);
+            throw new Error(`Unhandled REDIS command ${command}`);
           }
       }
 
-      if (!masterReplies && propagatedCommand) {
-        const socketInfo = this.getSocketInfo(socket);
-
-        socketInfo.processedBytes +=
-          redisProtocolEncoder.encodeArrWithBulkStrings(decodedData[i]).length;
-      }
-    }
-  }
-
-  private propagateCommand(decodedData: string[]): void {
-    this.clientSockets
-      .filter((sockInfo) => sockInfo.isReplica)
-      .forEach((sockInfo) => {
-        const respEncodedCommand =
-          redisProtocolEncoder.encodeArrWithBulkStrings(decodedData);
-
-        this.handleResponse(sockInfo.socket, respEncodedCommand);
-        sockInfo.propagatedBytes += respEncodedCommand.length;
-        console.log(`${sockInfo.propagatedBytes}/${sockInfo.processedBytes}`);
-      });
-  }
-
-  private createStringFromInfo(): string {
-    let result = "";
-    Object.keys(this.info).forEach(
-      (key) => (result += `${key}:${(this.info as any)[key]}`)
-    );
-    return result;
-  }
-
-  private addSocketIfNeeded(socket: net.Socket): void {
-    const socketInfo = this.clientSockets.find(
-      (socketInfo) => socketInfo.socket === socket
-    );
-    if (!socketInfo) {
-      this.clientSockets.push({
-        socket,
-        processedBytes: 0,
-        numberOfResponses: 0,
-        propagatedBytes: 0,
-        isMulti: false,
-        queuedCommands: [],
-        queuedReplies: [],
-        isReplica: false,
-        isExec: false,
-      });
-    }
-  }
-
-  private getSocketInfo(socket: net.Socket): ISocketInfo {
-    const socketInfo = this.clientSockets.find(
-      (socketInfo) => socketInfo.socket === socket
-    );
-
-    if (!socketInfo) {
-      throw new Error("Socket does not exists");
-    }
-
-    return socketInfo;
-  }
-
-  private async blockThread(
-    streamKey: string,
-    streamID: string,
-    socket: net.Socket
-  ): Promise<void> {
-    return new Promise((resolve) => {
-      setInterval(() => {
-        if (this.postponedCommands.length === 0) {
-          const responseArr = streamHandler.readStream(streamKey, streamID);
-
-          const isNullStream = streamHandler.isNullStream(responseArr);
-
-          if (isNullStream) {
-            this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
-          } else {
-            this.handleResponse(
-              socket,
-              redisProtocolEncoder.encodeRespArr([responseArr])
-            );
-          }
-
-          resolve();
-        }
-      }, 300);
-    });
-  }
-
-  private delayResponse(
-    streamKey: string,
-    streamID: string,
-    socket: net.Socket,
-    timeout: number
-  ): void {
-    setTimeout(() => {
-      const responseArr = [];
-      responseArr.push(streamHandler.readStream(streamKey, streamID));
-
-      const isNullStream = streamHandler.isNullStream(responseArr[0]);
-
-      console.log("READ RESPONSE: ", responseArr);
-      if (isNullStream) {
-        this.handleResponse(socket, redisProtocolEncoder.nullBulkString());
+      if (socketsInfo.getInfo(socket).isReplica) {
+        this.processReplicaCommand(socket, command);
       } else {
-        this.handleResponse(
-          socket,
-          redisProtocolEncoder.encodeRespArr(responseArr)
-        );
+        this.propagateCommand(command);
       }
-    }, timeout);
-  }
-
-  private handleResponse(socket: net.Socket, message: string | Buffer): void {
-    if (this.getSocketInfo(socket).isExec) {
-      this.getSocketInfo(socket).queuedReplies.push(message);
-    } else {
-      socket.write(message);
     }
   }
 
-  private handleMultiCommand(
-    socket: net.Socket,
-    decodedData: string[]
-  ): boolean {
+  private propagateCommand(command: string[]): void {
+    const writeCommands: string[] = ["set"];
+
+    if (writeCommands.includes(command[0].toLowerCase())) {
+      socketsInfo.sockets
+        .filter((socketInfo: ISocketInfo) => socketInfo.isReplica)
+        .forEach((socketInfo: ISocketInfo) => {
+          const respEncodedCommand: string =
+            redisProtocolEncoder.encodeRespArr(command);
+          socketInfo.socket.write(respEncodedCommand);
+          socketInfo.propagatedBytes += respEncodedCommand.length;
+        });
+    }
+  }
+
+  private processReplicaCommand(socket: net.Socket, command: string[]): void {
+    const replicaCommands: string[] = ["ping", "set"];
+
     if (
-      this.getSocketInfo(socket).isMulti &&
-      decodedData[0] !== "EXEC" &&
-      decodedData[0] !== "DISCARD"
+      replicaCommands.includes(command[0].toLowerCase()) ||
+      (command[0].toLowerCase() === "replconf" &&
+        command[1].toLowerCase() === "getack")
     ) {
-      this.getSocketInfo(socket).queuedCommands.push(decodedData);
-      this.handleResponse(
-        socket,
-        redisProtocolEncoder.encodeSimpleString("QUEUED")
-      );
-      return true;
-    } else {
-      return false;
+      const processedBytes: number =
+        redisProtocolEncoder.encodeRespArr(command).length;
+      socketsInfo.getInfo(socket).processedBytes += processedBytes;
     }
   }
 }
 
-const redisCommandHandler = new RedisCommandHandler();
+const redisCommandHandler: RedisCommandHandler = new RedisCommandHandler();
 export { redisCommandHandler };
