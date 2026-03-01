@@ -183,6 +183,10 @@ class RedisCommandHandler {
           list.rPush(socket, command);
           break;
 
+        case "lrange":
+          list.lrange(socket, command);
+          break;
+
         default:
           if (
             command[0].startsWith("FULLRESYNC") ||
