@@ -1,10 +1,11 @@
 import * as net from "net";
-import { Response } from "./response";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import type { TStream, TStreamEntry } from "./model";
-import { Subject, take, tap } from "rxjs";
 
-export class Streams {
+import { Subject, take, tap } from "rxjs";
+import type { TStream, TStreamEntry } from "../models/model";
+import { Response } from "../response";
+import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
+
+class Streams {
   STORED_STREAMS: TStream[] = [];
   streamAdded$: Subject<void> = new Subject();
 

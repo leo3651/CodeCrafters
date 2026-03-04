@@ -1,5 +1,5 @@
 import * as net from "net";
-import { redisProtocolParser } from "./redisProtocolParser";
+import { redisProtocolParser } from "./protocol/redisProtocolParser";
 import { redisCommandHandler } from "./redisCommandHandler";
 import { socketsInfo } from "./socketsInfo";
 

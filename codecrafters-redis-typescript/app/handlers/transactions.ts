@@ -1,8 +1,8 @@
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import { Response } from "./response";
+import { Response } from "../response";
 import * as net from "net";
-import { socketsInfo } from "./socketsInfo";
-import { EExecutionType } from "./model";
+import { socketsInfo } from "../socketsInfo";
+import { EExecutionType } from "../models/model";
+import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 export class Transactions {
   public static multi(socket: net.Socket): void {

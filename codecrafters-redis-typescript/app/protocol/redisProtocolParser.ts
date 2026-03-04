@@ -44,8 +44,7 @@ class RedisProtocolParser {
         }
 
         const size: string = data.slice(start, i);
-        i += size.length;
-        i++;
+        i += 2;
 
         for (let j = 0; j < Number.parseInt(size); j++) {
           const {

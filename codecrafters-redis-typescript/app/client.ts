@@ -1,8 +1,8 @@
 import * as net from "net";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
 import { redisCommandHandler } from "./redisCommandHandler";
-import { redisProtocolParser } from "./redisProtocolParser";
+import { redisProtocolParser } from "./protocol/redisProtocolParser";
 import { socketsInfo } from "./socketsInfo";
+import { redisProtocolEncoder } from "./protocol/redisProtocolEncoder";
 
 export function createClient(
   host: string,

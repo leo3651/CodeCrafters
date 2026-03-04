@@ -1,6 +1,6 @@
 import { createClient } from "./client";
-import { InfoGenerator } from "./infoGenerator";
-import { redisFile } from "./redisFile";
+import { InfoGenerator } from "./handlers/infoGenerator";
+import { redisFile } from "./protocol/redisFile";
 import { createServer } from "./server";
 
 const args: string[] = process.argv.slice(2);

@@ -1,4 +1,5 @@
 import * as net from "net";
+import { Subject, type Subscription } from "rxjs";
 
 export enum EOpCode {
   EOF = 0xff,
@@ -13,6 +14,12 @@ export enum EExecutionType {
   Multi,
   Exec,
   Regular,
+  Subscribe,
+}
+
+export enum EAddType {
+  Prepend,
+  Append,
 }
 
 export interface IInfo {
@@ -30,9 +37,16 @@ export interface ISocketInfo {
   queuedReplies: Reply[];
   isReplica: boolean;
   executionType: EExecutionType;
+  blockPopTimeout: Timer | null;
+  listElAddedSubscription: Subscription | null;
+  subscriptions: { [channelName: string]: Subscription };
 }
 
 export type Reply = Buffer | string;
 
 export type TStream = [string, TStreamEntry[]];
 export type TStreamEntry = [string, string[]];
+
+export interface ChannelDict {
+  [channelName: string]: Subject<string>;
+}

@@ -1,16 +1,22 @@
 import * as net from "net";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import { redisFile } from "./redisFile";
 import { socketsInfo } from "./socketsInfo";
-import { type ISocketInfo } from "./model";
+import { EExecutionType, type ISocketInfo } from "./models/model";
 import { Response } from "./response";
-import { streams } from "./streams";
-import { Dictionary } from "./dictionary";
-import { Wait } from "./wait";
-import { Type } from "./type";
-import { InfoGenerator } from "./infoGenerator";
-import { Transactions } from "./transactions";
-import { list } from "./list";
+import { InfoGenerator } from "./handlers/infoGenerator";
+import { Transactions } from "./handlers/transactions";
+import { list } from "./handlers/list";
+import { channelHandler } from "./handlers/channel";
+import { Pong } from "./commands/pong";
+import { ReplConf } from "./commands/replconf";
+import { Ok } from "./commands/ok";
+import { Psync } from "./commands/psync";
+import { redisProtocolEncoder } from "./protocol/redisProtocolEncoder";
+import { Dictionary } from "./handlers/dictionary";
+import { redisFile } from "./protocol/redisFile";
+import { Wait } from "./commands/wait";
+import { Type } from "./commands/type";
+import { streams } from "./handlers/streams";
+import { Ping } from "./commands/ping";
 
 class RedisCommandHandler {
   public processCommands(commands: string[][], socket: net.Socket): void {
@@ -23,6 +29,21 @@ class RedisCommandHandler {
     if (Transactions.cmdRanUnderMulti(socket, command)) {
       Transactions.queueCommand(socket, command);
     } else {
+      if (
+        socketsInfo.getInfo(socket).executionType === EExecutionType.Subscribe
+      ) {
+        if (
+          !channelHandler.subscribedModeCmds.includes(command[0].toLowerCase())
+        ) {
+          socket.write(
+            redisProtocolEncoder.encodeSimpleError(
+              `ERR Can't execute '${command[0]}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context`,
+            ),
+          );
+          return;
+        }
+      }
+
       switch (command[0].toLowerCase()) {
         case "echo":
           const echo: string = command[1];
@@ -30,10 +51,7 @@ class RedisCommandHandler {
           break;
 
         case "ping":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeSimpleString("PONG"),
-          );
+          Ping.exe(socket);
           break;
 
         case "set":
@@ -66,7 +84,6 @@ class RedisCommandHandler {
               command[2] === "dir" ? redisFile.dir : redisFile.dbFileName,
             ]),
           );
-
           break;
 
         case "info":
@@ -77,70 +94,19 @@ class RedisCommandHandler {
           break;
 
         case "pong":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeRespArr([
-              "REPLCONF",
-              "listening-port",
-              `${(socket as any).manualLocalPort}`,
-            ]),
-          );
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeRespArr(["REPLCONF", "capa", "psync2"]),
-          );
+          Pong.exe(socket);
           break;
 
         case "ok":
-          socketsInfo.getInfo(socket).numberOfResponses++;
-
-          if (socketsInfo.getInfo(socket).numberOfResponses === 2) {
-            Response.handle(
-              socket,
-              redisProtocolEncoder.encodeRespArr(["PSYNC", "?", "-1"]),
-            );
-            socketsInfo.getInfo(socket).isReplica = true;
-          }
+          Ok.exe(socket);
           break;
 
         case "replconf":
-          if (command[1] === "GETACK") {
-            Response.handle(
-              socket,
-              redisProtocolEncoder.encodeRespArr([
-                "REPLCONF",
-                "ACK",
-                `${socketsInfo.getInfo(socket).processedBytes}`,
-              ]),
-            );
-          } else if (command[1] === "ACK") {
-            socketsInfo.getInfo(socket).processedBytes = Number.parseInt(
-              command[2],
-            );
-            socketsInfo.getInfo(socket).propagatedBytes +=
-              redisProtocolEncoder.encodeRespArr([
-                "REPLCONF",
-                "GETACK",
-                "*",
-              ]).length;
-          } else {
-            Response.handle(
-              socket,
-              redisProtocolEncoder.encodeSimpleString("OK"),
-            );
-          }
+          ReplConf.exe(socket, command);
           break;
 
         case "psync":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeSimpleString(
-              `FULLRESYNC ${InfoGenerator.info.master_replid} ${InfoGenerator.info.master_repl_offset}`,
-            ),
-          );
-          Response.handle(socket, redisFile.getEmptyRdbFileBuffer());
-          socketsInfo.getInfo(socket).isReplica = true;
-
+          Psync.exe(socket);
           break;
 
         case "wait":
@@ -184,7 +150,35 @@ class RedisCommandHandler {
           break;
 
         case "lrange":
-          list.lrange(socket, command);
+          list.lRange(socket, command);
+          break;
+
+        case "lpush":
+          list.lPush(socket, command);
+          break;
+
+        case "llen":
+          list.lLen(socket, command);
+          break;
+
+        case "lpop":
+          list.lPop(socket, command);
+          break;
+
+        case "blpop":
+          list.blPop(socket, command);
+          break;
+
+        case "subscribe":
+          channelHandler.subscribe(socket, command);
+          break;
+
+        case "publish":
+          channelHandler.publish(socket, command);
+          break;
+
+        case "unsubscribe":
+          channelHandler.unsubscribe(socket, command);
           break;
 
         default:

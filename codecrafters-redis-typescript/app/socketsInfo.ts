@@ -1,5 +1,5 @@
 import * as net from "net";
-import { EExecutionType, type ISocketInfo } from "./model";
+import { EExecutionType, type ISocketInfo } from "./models/model";
 
 class SocketsInfo {
   public sockets: ISocketInfo[] = [];
@@ -14,6 +14,9 @@ class SocketsInfo {
       queuedReplies: [],
       isReplica: false,
       executionType: EExecutionType.Regular,
+      blockPopTimeout: null,
+      listElAddedSubscription: null,
+      subscriptions: {},
     });
   }
 

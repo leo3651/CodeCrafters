@@ -1,7 +1,7 @@
-import { redisFile } from "./redisFile";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import { Response } from "./response";
 import * as net from "net";
+import { redisFile } from "../protocol/redisFile";
+import { Response } from "../response";
+import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 export class Dictionary {
   private static DICTIONARY: { [key: string]: string } = {};

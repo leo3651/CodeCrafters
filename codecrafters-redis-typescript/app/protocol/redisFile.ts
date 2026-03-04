@@ -1,5 +1,5 @@
 import fs from "fs";
-import { EOpCode } from "./model";
+import { EOpCode } from "../models/model";
 
 class RedisFile {
   private redisFileOffset: number = 0;

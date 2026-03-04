@@ -1,9 +1,9 @@
 import * as net from "net";
-import { Dictionary } from "./dictionary";
-import { streams } from "./streams";
-import { Response } from "./response";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import type { TStream } from "./model";
+import { Dictionary } from "../handlers/dictionary";
+import { streams } from "../handlers/streams";
+import type { TStream } from "../models/model";
+import { Response } from "../response";
+import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 export class Type {
   public static exe(socket: net.Socket, command: string[]): void {

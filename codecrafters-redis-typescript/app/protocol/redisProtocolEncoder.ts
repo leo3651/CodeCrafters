@@ -1,6 +1,6 @@
 class RedisProtocolEncoder {
   public encodeBulkString(data: string | undefined): string {
-    if (data) {
+    if (data === "" || data) {
       return `$${data.length}\r\n${data}\r\n`;
     } else {
       return this.encodeNullBulkString();
@@ -35,6 +35,8 @@ class RedisProtocolEncoder {
         finalString += this.encodeRespArr(arr[i]);
       } else if (typeof arr[i] === "string") {
         finalString += this.encodeBulkString(arr[i]);
+      } else if (typeof arr[i] === "number") {
+        finalString += this.encodeNumber(arr[i]);
       }
     }
 

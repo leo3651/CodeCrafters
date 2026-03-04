@@ -1,8 +1,8 @@
-import type { ISocketInfo } from "./model";
-import { redisProtocolEncoder } from "./redisProtocolEncoder";
-import { Response } from "./response";
-import { socketsInfo } from "./socketsInfo";
 import * as net from "net";
+import { socketsInfo } from "../socketsInfo";
+import type { ISocketInfo } from "../models/model";
+import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
+import { Response } from "../response";
 
 export class Wait {
   private static askForACKInterval: Timer;

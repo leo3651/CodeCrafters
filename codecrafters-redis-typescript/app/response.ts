@@ -1,6 +1,6 @@
 import * as net from "net";
 import { socketsInfo } from "./socketsInfo";
-import { EExecutionType } from "./model";
+import { EExecutionType } from "./models/model";
 
 export class Response {
   public static handle(socket: net.Socket, message: string | Buffer): void {
