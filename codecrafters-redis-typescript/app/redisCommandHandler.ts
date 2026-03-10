@@ -17,6 +17,7 @@ import { Wait } from "./commands/wait";
 import { Type } from "./commands/type";
 import { streams } from "./handlers/streams";
 import { Ping } from "./commands/ping";
+import { set } from "./handlers/set";
 
 class RedisCommandHandler {
   public processCommands(commands: string[][], socket: net.Socket): void {
@@ -179,6 +180,22 @@ class RedisCommandHandler {
 
         case "unsubscribe":
           channelHandler.unsubscribe(socket, command);
+          break;
+
+        case "zadd":
+          set.zAdd(socket, command);
+          break;
+
+        case "zrank":
+          set.zRank(socket, command);
+          break;
+
+        case "zrange":
+          set.zRange(socket, command);
+          break;
+
+        case "zcard":
+          set.zCard(socket, command);
           break;
 
         default:

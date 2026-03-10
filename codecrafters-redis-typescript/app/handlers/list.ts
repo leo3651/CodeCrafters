@@ -106,10 +106,7 @@ class List {
     Response.handle(
       socket,
       redisProtocolEncoder.encodeRespArr(
-        list.slice(
-          lowBoundary,
-          highBoundary + 1 === 0 ? list.length : highBoundary + 1,
-        ),
+        list.slice(lowBoundary, highBoundary + 1 || list.length),
       ),
     );
   }

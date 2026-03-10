@@ -50,3 +50,8 @@ export type TStreamEntry = [string, string[]];
 export interface ChannelDict {
   [channelName: string]: Subject<string>;
 }
+
+export type SetMember = {
+  name: string;
+  score: number;
+};
