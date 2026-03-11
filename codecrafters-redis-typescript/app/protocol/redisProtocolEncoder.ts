@@ -31,7 +31,9 @@ class RedisProtocolEncoder {
     let finalString: string = `*${arr.length}\r\n`;
 
     for (let i = 0; i < arr.length; i++) {
-      if (Array.isArray(arr[i])) {
+      if (arr[i] === null) {
+        finalString += this.encodeNullArr();
+      } else if (Array.isArray(arr[i])) {
         finalString += this.encodeRespArr(arr[i]);
       } else if (typeof arr[i] === "string") {
         finalString += this.encodeBulkString(arr[i]);

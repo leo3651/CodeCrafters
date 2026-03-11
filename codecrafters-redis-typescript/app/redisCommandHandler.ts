@@ -18,6 +18,7 @@ import { Type } from "./commands/type";
 import { streams } from "./handlers/streams";
 import { Ping } from "./commands/ping";
 import { set } from "./handlers/set";
+import { geo } from "./handlers/geo";
 
 class RedisCommandHandler {
   public processCommands(commands: string[][], socket: net.Socket): void {
@@ -196,6 +197,26 @@ class RedisCommandHandler {
 
         case "zcard":
           set.zCard(socket, command);
+          break;
+
+        case "zscore":
+          set.zScore(socket, command);
+          break;
+
+        case "zrem":
+          set.zRem(socket, command);
+          break;
+
+        case "geoadd":
+          geo.geoAdd(socket, command);
+          break;
+
+        case "geopos":
+          geo.geoPos(socket, command);
+          break;
+
+        case "geodist":
+          geo.geoDist(socket, command);
           break;
 
         default:

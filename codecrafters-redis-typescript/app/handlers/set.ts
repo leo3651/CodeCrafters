@@ -8,7 +8,7 @@ class Set {
 
   public zAdd(socket: net.Socket, command: string[]): void {
     const setName: string = command[1];
-    const setMemberScore: number = Number.parseFloat(command[2]);
+    const setMemberScore: string = command[2];
     const setMemberName: string = command[3];
 
     const set: SetMember[] = (this.setDictionary[setName] ??= []);
@@ -72,6 +72,40 @@ class Set {
     Response.handle(socket, redisProtocolEncoder.encodeNumber(`${set.length}`));
   }
 
+  public zScore(socket: net.Socket, command: string[]): void {
+    const setName: string = command[1];
+    const set: SetMember[] = this.setDictionary[setName] || [];
+    const setMemberName: string = command[2];
+
+    const setMember: SetMember | undefined = this.findSetMember(
+      set,
+      setMemberName,
+    );
+
+    Response.handle(
+      socket,
+      redisProtocolEncoder.encodeBulkString(`${setMember?.score}`),
+    );
+  }
+
+  public zRem(socket: net.Socket, command: string[]): void {
+    const setName: string = command[1];
+    const set: SetMember[] = this.setDictionary[setName] || [];
+    const setMemberName: string = command[2];
+
+    const setMember: SetMember | undefined = this.findSetMember(
+      set,
+      setMemberName,
+    );
+
+    if (setMember) {
+      set.splice(this.getSetMemberRank(set, setMember), 1);
+      Response.handle(socket, redisProtocolEncoder.encodeNumber(`1`));
+    } else {
+      Response.handle(socket, redisProtocolEncoder.encodeNumber(`0`));
+    }
+  }
+
   private getSetMemberRank(set: SetMember[], setMember: SetMember): number {
     return set.indexOf(setMember);
   }
@@ -84,24 +118,35 @@ class Set {
   private updateSetMember(
     set: SetMember[],
     setMember: SetMember,
-    newSetMemberScore: number,
+    newSetMemberScore: string,
   ): void {
     setMember.score = newSetMemberScore;
     this.sortSet(set);
   }
 
   private sortSet(set: SetMember[]): void {
-    set.sort(
-      (a: SetMember, b: SetMember) =>
-        a.score - b.score || a.name.localeCompare(b.name),
-    );
+    set.sort((a: SetMember, b: SetMember) => {
+      let score: number = 0;
+
+      if (a.score.includes(".")) {
+        score = Number.parseFloat(a.score) - Number.parseFloat(b.score);
+      } else {
+        score = Number(BigInt(a.score) - BigInt(b.score));
+      }
+
+      return score || a.name.localeCompare(b.name);
+    });
   }
 
-  private findSetMember(
+  public findSetMember(
     set: SetMember[],
     setMemberName: string,
   ): SetMember | undefined {
     return set.find((setMember: SetMember) => setMember.name === setMemberName);
+  }
+
+  public getSet(setName: string): SetMember[] {
+    return this.setDictionary[setName] || [];
   }
 }
 

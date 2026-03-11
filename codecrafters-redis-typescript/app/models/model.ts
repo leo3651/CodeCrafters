@@ -53,5 +53,5 @@ export interface ChannelDict {
 
 export type SetMember = {
   name: string;
-  score: number;
+  score: string;
 };
