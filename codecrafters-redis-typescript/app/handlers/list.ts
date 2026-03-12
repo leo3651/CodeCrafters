@@ -1,6 +1,6 @@
 import * as net from "net";
 
-import { EAddType } from "../models/model";
+import { AddType } from "../models/model";
 import { Subject, take } from "rxjs";
 import { socketsInfo } from "../socketsInfo";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
@@ -75,7 +75,7 @@ class List {
   }
 
   public rPush(socket: net.Socket, command: string[]): void {
-    const list: string[] = this.addElements(command, EAddType.Append);
+    const list: string[] = this.addElements(command, AddType.Append);
 
     Response.handle(
       socket,
@@ -86,7 +86,7 @@ class List {
   }
 
   public lPush(socket: net.Socket, command: string[]): void {
-    const list: string[] = this.addElements(command, EAddType.Prepend);
+    const list: string[] = this.addElements(command, AddType.Prepend);
 
     Response.handle(
       socket,
@@ -111,14 +111,14 @@ class List {
     );
   }
 
-  private addElements(command: string[], addType: EAddType): string[] {
+  private addElements(command: string[], addType: AddType): string[] {
     const listKey: string = command[1];
     const elements: string[] = command.slice(2);
 
     // Get or create the list
     const list: string[] = (this.lists[listKey] ??= []);
 
-    if (addType === EAddType.Append) {
+    if (addType === AddType.Append) {
       list.push(...elements);
     } else {
       list.unshift(...elements.reverse());

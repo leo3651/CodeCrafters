@@ -1,8 +1,8 @@
 import * as net from "net";
-import { EExecutionType, type ISocketInfo } from "./models/model";
+import { ExecutionType, type SocketInfo } from "./models/model";
 
 class SocketsInfo {
-  public sockets: ISocketInfo[] = [];
+  public sockets: SocketInfo[] = [];
 
   public add(socket: net.Socket): void {
     this.sockets.push({
@@ -13,7 +13,7 @@ class SocketsInfo {
       queuedCommands: [],
       queuedReplies: [],
       isReplica: false,
-      executionType: EExecutionType.Regular,
+      executionType: ExecutionType.Regular,
       blockPopTimeout: null,
       listElAddedSubscription: null,
       subscriptions: {},
@@ -22,19 +22,19 @@ class SocketsInfo {
 
   public remove(socket: net.Socket): void {
     this.sockets = this.sockets.filter(
-      (socketInfo: ISocketInfo) => socketInfo.socket !== socket,
+      (socketInfo: SocketInfo) => socketInfo.socket !== socket,
     );
   }
 
-  public getInfo(socket: net.Socket): ISocketInfo {
+  public getInfo(socket: net.Socket): SocketInfo {
     return this.sockets.find(
-      (socketInfo: ISocketInfo) => socketInfo.socket === socket,
+      (socketInfo: SocketInfo) => socketInfo.socket === socket,
     )!;
   }
 
-  public getReplicas(): ISocketInfo[] {
+  public getReplicas(): SocketInfo[] {
     return this.sockets.filter(
-      (socketInfo: ISocketInfo) => socketInfo.isReplica,
+      (socketInfo: SocketInfo) => socketInfo.isReplica,
     );
   }
 }

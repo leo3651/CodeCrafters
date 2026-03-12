@@ -1,16 +1,12 @@
 import * as net from "net";
-import {
-  EExecutionType,
-  type ChannelDict,
-  type ISocketInfo,
-} from "../models/model";
+import { ExecutionType, type SocketInfo } from "../models/model";
 import { Subject } from "rxjs";
 import { socketsInfo } from "../socketsInfo";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 import { Response } from "../response";
 
 export class ChannelHandler {
-  private channels: ChannelDict = {};
+  private channels: Record<string, Subject<string>> = {};
   public readonly subscribedModeCmds = [
     "subscribe",
     "unsubscribe",
@@ -34,7 +30,7 @@ export class ChannelHandler {
       this.subscribeToTheChannel(socket, channelName);
     }
 
-    socketsInfo.getInfo(socket).executionType = EExecutionType.Subscribe;
+    socketsInfo.getInfo(socket).executionType = ExecutionType.Subscribe;
 
     Response.handle(
       socket,
@@ -53,7 +49,7 @@ export class ChannelHandler {
     delete socketsInfo.getInfo(socket).subscriptions[channelName];
 
     const numberOfSubscribers: number = socketsInfo.sockets.filter(
-      (socketInfo: ISocketInfo) => socketInfo.subscriptions[channelName],
+      (socketInfo: SocketInfo) => socketInfo.subscriptions[channelName],
     ).length;
 
     Response.handle(
@@ -77,7 +73,7 @@ export class ChannelHandler {
       redisProtocolEncoder.encodeNumber(
         `${
           socketsInfo.sockets.filter(
-            (socketInfo: ISocketInfo) => socketInfo.subscriptions[channelName],
+            (socketInfo: SocketInfo) => socketInfo.subscriptions[channelName],
           ).length
         }`,
       ),

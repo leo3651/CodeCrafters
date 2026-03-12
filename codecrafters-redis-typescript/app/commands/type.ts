@@ -1,7 +1,7 @@
 import * as net from "net";
 import { Dictionary } from "../handlers/dictionary";
 import { streams } from "../handlers/streams";
-import type { TStream } from "../models/model";
+import type { Stream } from "../models/model";
 import { Response } from "../response";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
@@ -9,7 +9,7 @@ export class Type {
   public static exe(socket: net.Socket, command: string[]): void {
     const key: string = command[1];
     const value: string = Dictionary.getValue(key);
-    const stream: TStream | null = streams.getStream(key);
+    const stream: Stream | null = streams.getStream(key);
 
     if (value) {
       Response.handle(

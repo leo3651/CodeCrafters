@@ -1,6 +1,6 @@
 import * as net from "net";
 import { socketsInfo } from "./socketsInfo";
-import { EExecutionType, type ISocketInfo } from "./models/model";
+import { ExecutionType, type SocketInfo } from "./models/model";
 import { Response } from "./response";
 import { InfoGenerator } from "./handlers/infoGenerator";
 import { Transactions } from "./handlers/transactions";
@@ -19,6 +19,7 @@ import { streams } from "./handlers/streams";
 import { Ping } from "./commands/ping";
 import { set } from "./handlers/set";
 import { geo } from "./handlers/geo";
+import { authentication } from "./handlers/authtentication";
 
 class RedisCommandHandler {
   public processCommands(commands: string[][], socket: net.Socket): void {
@@ -32,7 +33,7 @@ class RedisCommandHandler {
       Transactions.queueCommand(socket, command);
     } else {
       if (
-        socketsInfo.getInfo(socket).executionType === EExecutionType.Subscribe
+        socketsInfo.getInfo(socket).executionType === ExecutionType.Subscribe
       ) {
         if (
           !channelHandler.subscribedModeCmds.includes(command[0].toLowerCase())
@@ -219,6 +220,18 @@ class RedisCommandHandler {
           geo.geoDist(socket, command);
           break;
 
+        case "geosearch":
+          geo.geoSearch(socket, command);
+          break;
+
+        case "acl":
+          authentication.acl(socket, command);
+          break;
+
+        case "auth":
+          authentication.auth(socket, command);
+          break;
+
         default:
           if (
             command[0].startsWith("FULLRESYNC") ||
@@ -242,8 +255,8 @@ class RedisCommandHandler {
 
     if (writeCommands.includes(command[0].toLowerCase())) {
       socketsInfo.sockets
-        .filter((socketInfo: ISocketInfo) => socketInfo.isReplica)
-        .forEach((socketInfo: ISocketInfo) => {
+        .filter((socketInfo: SocketInfo) => socketInfo.isReplica)
+        .forEach((socketInfo: SocketInfo) => {
           const respEncodedCommand: string =
             redisProtocolEncoder.encodeRespArr(command);
           socketInfo.socket.write(respEncodedCommand);

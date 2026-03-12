@@ -1,5 +1,5 @@
 import fs from "fs";
-import { EOpCode } from "../models/model";
+import { OpCode } from "../models/model";
 
 class RedisFile {
   private redisFileOffset: number = 0;
@@ -51,7 +51,7 @@ class RedisFile {
         break;
       }
 
-      this.parseOpCode(data);
+      this.parsOpCode(data);
     }
 
     console.log("NO EXPIRY", this.KEY_VAL_WITHOUT_EXPIRY);
@@ -59,9 +59,9 @@ class RedisFile {
     console.log("AUX:", this.AUX_KEY_VAL_PAIRS);
   }
 
-  private parseOpCode(data: Buffer): void {
+  private parsOpCode(data: Buffer): void {
     switch (data[this.redisFileOffset]) {
-      case EOpCode.AUX:
+      case OpCode.AUX:
         this.redisFileOffset++;
         const key: Buffer = this.readRedisString(data);
 
@@ -71,11 +71,11 @@ class RedisFile {
         this.AUX_KEY_VAL_PAIRS[key.toString()] = val.toString();
         break;
 
-      case EOpCode.SELECTDB:
+      case OpCode.SELECTDB:
         this.redisFileOffset++;
         break;
 
-      case EOpCode.RESIZE_DB:
+      case OpCode.RESIZE_DB:
         this.redisFileOffset++;
         {
           const totalHashTableSize: number = this.readLength(data);
@@ -87,7 +87,7 @@ class RedisFile {
             totalHashTableSize - expiryHashTableSize;
 
           for (let i = 0; i < expiryHashTableSize; i++) {
-            this.parseOpCode(data);
+            this.parsOpCode(data);
           }
 
           for (let i = 0; i < hashTableSizeWithoutExpiry; i++) {
@@ -108,11 +108,11 @@ class RedisFile {
 
         break;
 
-      case EOpCode.EXPIRE_TIME_SEC:
-      case EOpCode.EXPIRE_TIME_MS:
+      case OpCode.EXPIRE_TIME_SEC:
+      case OpCode.EXPIRE_TIME_MS:
         let expiryDate: number = 0;
 
-        if (data[this.redisFileOffset] === EOpCode.EXPIRE_TIME_SEC) {
+        if (data[this.redisFileOffset] === OpCode.EXPIRE_TIME_SEC) {
           expiryDate =
             data.subarray(this.redisFileOffset).readUInt32LE(1) * 1000;
           this.redisFileOffset += 5;
@@ -140,7 +140,7 @@ class RedisFile {
 
         break;
 
-      case EOpCode.EOF:
+      case OpCode.EOF:
         this.redisFileOffset += 8;
         break;
 

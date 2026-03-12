@@ -1,7 +1,7 @@
 import * as net from "net";
 import { Subject, type Subscription } from "rxjs";
 
-export enum EOpCode {
+export enum OpCode {
   EOF = 0xff,
   SELECTDB = 0xfe,
   EXPIRE_TIME_SEC = 0xfd,
@@ -10,25 +10,25 @@ export enum EOpCode {
   AUX = 0xfa,
 }
 
-export enum EExecutionType {
+export enum ExecutionType {
   Multi,
   Exec,
   Regular,
   Subscribe,
 }
 
-export enum EAddType {
+export enum AddType {
   Prepend,
   Append,
 }
 
-export interface IInfo {
+export interface Info {
   role: string;
   master_replid: string;
   master_repl_offset: number;
 }
 
-export interface ISocketInfo {
+export interface SocketInfo {
   socket: net.Socket;
   propagatedBytes: number;
   processedBytes: number;
@@ -36,7 +36,7 @@ export interface ISocketInfo {
   queuedCommands: string[][];
   queuedReplies: Reply[];
   isReplica: boolean;
-  executionType: EExecutionType;
+  executionType: ExecutionType;
   blockPopTimeout: Timer | null;
   listElAddedSubscription: Subscription | null;
   subscriptions: { [channelName: string]: Subscription };
@@ -44,14 +44,20 @@ export interface ISocketInfo {
 
 export type Reply = Buffer | string;
 
-export type TStream = [string, TStreamEntry[]];
-export type TStreamEntry = [string, string[]];
-
-export interface ChannelDict {
-  [channelName: string]: Subject<string>;
-}
+export type Stream = [string, StreamEntry[]];
+export type StreamEntry = [string, string[]];
 
 export type SetMember = {
   name: string;
   score: string;
+};
+
+export enum Coordinates {
+  Longitude,
+  Latitude,
+}
+
+export type User = {
+  flags: Set<string>;
+  passwords: Set<string>;
 };

@@ -1,12 +1,12 @@
 import * as net from "net";
 
 import { Subject, take, tap } from "rxjs";
-import type { TStream, TStreamEntry } from "../models/model";
+import type { Stream, StreamEntry } from "../models/model";
 import { Response } from "../response";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 class Streams {
-  STORED_STREAMS: TStream[] = [];
+  STORED_STREAMS: Stream[] = [];
   streamAdded$: Subject<void> = new Subject();
 
   public xAdd(socket: net.Socket, command: string[]): void {
@@ -44,9 +44,9 @@ class Streams {
 
     let startingIndex: number = 0;
     let endingIndex: number = 0;
-    let responseArr: TStreamEntry[] = [];
+    let responseArr: StreamEntry[] = [];
 
-    const stream: TStream | null = this.getStream(streamKey);
+    const stream: Stream | null = this.getStream(streamKey);
     if (!stream) {
       throw new Error("Stream does not exists");
     }
@@ -106,7 +106,7 @@ class Streams {
         this.delayResponse(streamsKeys[0], streamsIDs[0], socket, timeout);
       }
     } else {
-      const responseArr: TStream[] = [];
+      const responseArr: Stream[] = [];
 
       streamsKeys.forEach((sKey, i) => {
         responseArr.push(this.readStream(sKey, streamsIDs[i]));
@@ -117,21 +117,21 @@ class Streams {
     }
   }
 
-  public getStream(streamKey: string): TStream | null {
-    const stream: TStream | undefined = this.STORED_STREAMS.find(
+  public getStream(streamKey: string): Stream | null {
+    const stream: Stream | undefined = this.STORED_STREAMS.find(
       ([sKey, _]) => streamKey === sKey,
     );
 
     return stream || null;
   }
 
-  private readStream(streamKey: string, streamID: string): TStream {
-    const stream: TStream | null = this.getStream(streamKey);
+  private readStream(streamKey: string, streamID: string): Stream {
+    const stream: Stream | null = this.getStream(streamKey);
     if (!stream) {
       throw new Error("Can't read the given stream");
     }
 
-    const acceptableEntries: TStreamEntry[] = [];
+    const acceptableEntries: StreamEntry[] = [];
 
     if (streamID !== "$") {
       stream[1].forEach(([sID, sEntry]) => {
@@ -143,7 +143,7 @@ class Streams {
         }
       });
     } else if (streamID === "$") {
-      const topStreamEntry: TStreamEntry | undefined = stream[1].pop();
+      const topStreamEntry: StreamEntry | undefined = stream[1].pop();
       if (topStreamEntry) {
         acceptableEntries.push(topStreamEntry);
       }
@@ -153,7 +153,7 @@ class Streams {
   }
 
   private createStreamID(streamKey: string): string {
-    const topStreamEntry: TStreamEntry | undefined =
+    const topStreamEntry: StreamEntry | undefined =
       this.getStreamTopEntry(streamKey);
 
     let topSeqNum: number = 0;
@@ -176,8 +176,8 @@ class Streams {
     }
   }
 
-  private getStreamTopEntry(streamKey: string): TStreamEntry | undefined {
-    const stream: TStream | null = this.getStream(streamKey);
+  private getStreamTopEntry(streamKey: string): StreamEntry | undefined {
+    const stream: Stream | null = this.getStream(streamKey);
 
     if (stream) {
       return stream[1]?.slice()?.pop();
@@ -200,7 +200,7 @@ class Streams {
 
     let topSeqNum: number = 0;
     let topMs: number = 0;
-    const topStreamEntry: TStreamEntry | undefined =
+    const topStreamEntry: StreamEntry | undefined =
       this.getStreamTopEntry(streamKey);
 
     if (topStreamEntry) {
@@ -255,7 +255,7 @@ class Streams {
       let sequenceNumber: number;
 
       if (val2 === "*") {
-        const topStreamEntry: TStreamEntry | undefined =
+        const topStreamEntry: StreamEntry | undefined =
           this.getStreamTopEntry(streamKey);
         let topSeqNum: number = 0;
         let topMs: number = 0;
@@ -284,8 +284,8 @@ class Streams {
     }
   }
 
-  private storeStream(streamKey: string, streamEntry: TStreamEntry): void {
-    const stream: TStream | null = this.getStream(streamKey);
+  private storeStream(streamKey: string, streamEntry: StreamEntry): void {
+    const stream: Stream | null = this.getStream(streamKey);
 
     if (stream) {
       stream[1].push(streamEntry);
@@ -303,7 +303,7 @@ class Streams {
     timeout: number,
   ): void {
     setTimeout(() => {
-      const responseArr: TStream[] = [];
+      const responseArr: Stream[] = [];
       responseArr.push(this.readStream(streamKey, streamID));
 
       const isNullStream: boolean = this.isNullStream(responseArr[0]);
@@ -321,7 +321,7 @@ class Streams {
     }, timeout);
   }
 
-  private isNullStream(stream: TStream): boolean {
+  private isNullStream(stream: Stream): boolean {
     if (!stream[1] || stream[1].length === 0) {
       return true;
     } else {
@@ -338,7 +338,7 @@ class Streams {
       .pipe(
         take(1),
         tap(() => {
-          const response: TStream = this.readStream(streamKey, streamID);
+          const response: Stream = this.readStream(streamKey, streamID);
 
           const isNullStream: boolean = this.isNullStream(response);
 

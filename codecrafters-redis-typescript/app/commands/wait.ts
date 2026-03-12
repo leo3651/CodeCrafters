@@ -1,6 +1,6 @@
 import * as net from "net";
 import { socketsInfo } from "../socketsInfo";
-import type { ISocketInfo } from "../models/model";
+import type { SocketInfo } from "../models/model";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 import { Response } from "../response";
 
@@ -20,7 +20,7 @@ export class Wait {
 
   private static askForACK(): void {
     this.askForACKInterval = setInterval(() => {
-      socketsInfo.getReplicas().forEach((socketInfo: ISocketInfo) => {
+      socketsInfo.getReplicas().forEach((socketInfo: SocketInfo) => {
         const respEncodedCommand: string = redisProtocolEncoder.encodeRespArr([
           "REPLCONF",
           "GETACK",

@@ -2,7 +2,7 @@ import * as net from "net";
 import { Response } from "../response";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 import { set } from "./set";
-import type { SetMember } from "../models/model";
+import { Coordinates, type SetMember } from "../models/model";
 
 class Geo {
   private readonly MIN_LATITUDE = -85.05112878;
@@ -74,20 +74,62 @@ class Geo {
     }
   }
 
+  public geoSearch(socket: net.Socket, command: string[]): void {
+    const setName: string = command[1];
+    const longitude: string = command[3];
+    const latitude: string = command[4];
+    const radius: string = command[6];
+    const activeSet: SetMember[] = set.getSet(setName);
+
+    const matchingSetMembers: string[] = activeSet
+      .filter((setMember: SetMember) => {
+        const coordinates: string[] = this.decodeLatitudeAndLongitude(
+          setMember.score,
+        );
+        if (
+          this.longitudeAndLatitudeValid(
+            Number.parseFloat(coordinates[Coordinates.Longitude]),
+            Number.parseFloat(coordinates[Coordinates.Latitude]),
+          )
+        ) {
+          const distance: number = this.haversine(
+            Number.parseFloat(coordinates[Coordinates.Longitude]),
+            Number.parseFloat(coordinates[Coordinates.Latitude]),
+            Number.parseFloat(longitude),
+            Number.parseFloat(latitude),
+          );
+
+          return distance <= Number.parseFloat(radius);
+        }
+      })
+      .map((setMember: SetMember) => setMember.name);
+
+    Response.handle(
+      socket,
+      redisProtocolEncoder.encodeRespArr(matchingSetMembers),
+    );
+  }
+
   private getDistance(
     activeSet: SetMember[],
     setMember1: string,
     setMember2: string,
   ): string {
-    const coordinates1 = this.getPosition(activeSet, setMember1);
-    const coordinates2 = this.getPosition(activeSet, setMember2);
+    const coordinates1: string[] | null = this.getPosition(
+      activeSet,
+      setMember1,
+    );
+    const coordinates2: string[] | null = this.getPosition(
+      activeSet,
+      setMember2,
+    );
 
     if (Array.isArray(coordinates1) && Array.isArray(coordinates2)) {
       return this.haversine(
-        Number.parseFloat(coordinates1[0]),
-        Number.parseFloat(coordinates1[1]),
-        Number.parseFloat(coordinates2[0]),
-        Number.parseFloat(coordinates2[1]),
+        Number.parseFloat(coordinates1[Coordinates.Longitude]),
+        Number.parseFloat(coordinates1[Coordinates.Latitude]),
+        Number.parseFloat(coordinates2[Coordinates.Longitude]),
+        Number.parseFloat(coordinates2[Coordinates.Latitude]),
       ).toString();
     } else {
       return "";

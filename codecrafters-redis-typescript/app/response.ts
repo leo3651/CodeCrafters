@@ -1,6 +1,6 @@
 import * as net from "net";
 import { socketsInfo } from "./socketsInfo";
-import { EExecutionType } from "./models/model";
+import { ExecutionType } from "./models/model";
 
 export class Response {
   public static handle(socket: net.Socket, message: string | Buffer): void {
@@ -8,7 +8,7 @@ export class Response {
       return;
     }
 
-    if (socketsInfo.getInfo(socket).executionType === EExecutionType.Exec) {
+    if (socketsInfo.getInfo(socket).executionType === ExecutionType.Exec) {
       socketsInfo.getInfo(socket).queuedReplies.push(message);
     } else {
       socket.write(message);

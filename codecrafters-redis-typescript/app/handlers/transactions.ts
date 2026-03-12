@@ -1,12 +1,12 @@
 import { Response } from "../response";
 import * as net from "net";
 import { socketsInfo } from "../socketsInfo";
-import { EExecutionType } from "../models/model";
+import { ExecutionType } from "../models/model";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 export class Transactions {
   public static multi(socket: net.Socket): void {
-    socketsInfo.getInfo(socket).executionType = EExecutionType.Multi;
+    socketsInfo.getInfo(socket).executionType = ExecutionType.Multi;
     Response.handle(socket, redisProtocolEncoder.encodeSimpleString("OK"));
   }
 
@@ -15,7 +15,7 @@ export class Transactions {
     processCommandCb: (command: string[], socket: net.Socket) => void,
   ): void {
     // Can not call exec without previously calling multi
-    if (socketsInfo.getInfo(socket).executionType !== EExecutionType.Multi) {
+    if (socketsInfo.getInfo(socket).executionType !== ExecutionType.Multi) {
       Response.handle(
         socket,
         redisProtocolEncoder.encodeSimpleError("ERR EXEC without MULTI"),
@@ -24,13 +24,13 @@ export class Transactions {
 
     // Exec
     else {
-      socketsInfo.getInfo(socket).executionType = EExecutionType.Exec;
+      socketsInfo.getInfo(socket).executionType = ExecutionType.Exec;
 
       socketsInfo.getInfo(socket).queuedCommands.forEach((queuedCommand) => {
         processCommandCb(queuedCommand, socket);
       });
 
-      socketsInfo.getInfo(socket).executionType = EExecutionType.Regular;
+      socketsInfo.getInfo(socket).executionType = ExecutionType.Regular;
 
       Response.handle(
         socket,
@@ -42,9 +42,9 @@ export class Transactions {
   }
 
   public static discard(socket: net.Socket): void {
-    if (socketsInfo.getInfo(socket).executionType === EExecutionType.Multi) {
+    if (socketsInfo.getInfo(socket).executionType === ExecutionType.Multi) {
       socketsInfo.getInfo(socket).queuedCommands = [];
-      socketsInfo.getInfo(socket).executionType = EExecutionType.Regular;
+      socketsInfo.getInfo(socket).executionType = ExecutionType.Regular;
       Response.handle(socket, redisProtocolEncoder.encodeSimpleString("OK"));
     } else {
       Response.handle(
@@ -64,7 +64,7 @@ export class Transactions {
     command: string[],
   ): boolean {
     return (
-      socketsInfo.getInfo(socket).executionType === EExecutionType.Multi &&
+      socketsInfo.getInfo(socket).executionType === ExecutionType.Multi &&
       command[0] !== "EXEC" &&
       command[0] !== "DISCARD"
     );
