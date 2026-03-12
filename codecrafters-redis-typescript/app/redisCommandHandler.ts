@@ -1,6 +1,6 @@
 import * as net from "net";
 import { socketsInfo } from "./socketsInfo";
-import { ExecutionType, type SocketInfo } from "./models/model";
+import { type SocketInfo } from "./models/model";
 import { Response } from "./response";
 import { InfoGenerator } from "./handlers/infoGenerator";
 import { Transactions } from "./handlers/transactions";
@@ -28,225 +28,243 @@ class RedisCommandHandler {
     }
   }
 
-  private processCommand(command: string[], socket: net.Socket): void {
+  private executedCmdUnderSpecialConditions(
+    socket: net.Socket,
+    command: string[],
+  ): boolean {
+    if (authentication.isNonAuthenticatedCommand(socket, command)) {
+      Response.handle(
+        socket,
+        redisProtocolEncoder.encodeSimpleError(
+          "NOAUTH Authentication required.",
+        ),
+      );
+      return true;
+    }
+
     if (Transactions.cmdRanUnderMulti(socket, command)) {
       Transactions.queueCommand(socket, command);
+      return true;
+    }
+
+    if (channelHandler.nonSubscribeCmdInSubscribeMode(socket, command)) {
+      Response.handle(
+        socket,
+        redisProtocolEncoder.encodeSimpleError(
+          `ERR Can't execute '${command[0]}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context`,
+        ),
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  private processCommand(command: string[], socket: net.Socket): void {
+    if (this.executedCmdUnderSpecialConditions(socket, command)) {
+      return;
     } else {
-      if (
-        socketsInfo.getInfo(socket).executionType === ExecutionType.Subscribe
-      ) {
+      this.executeCommand(socket, command);
+    }
+  }
+
+  private executeCommand(socket: net.Socket, command: string[]) {
+    switch (command[0].toLowerCase()) {
+      case "echo":
+        const echo: string = command[1];
+        Response.handle(socket, redisProtocolEncoder.encodeBulkString(echo));
+        break;
+
+      case "ping":
+        Ping.exe(socket);
+        break;
+
+      case "set":
+        Dictionary.set(command);
+        Response.handle(socket, redisProtocolEncoder.encodeSimpleString("OK"));
+        break;
+
+      case "get":
+        Response.handle(
+          socket,
+          redisProtocolEncoder.encodeBulkString(Dictionary.get(command)),
+        );
+        break;
+
+      case "keys":
+        Response.handle(
+          socket,
+          redisProtocolEncoder.encodeRespArr(Dictionary.keys(command)),
+        );
+        break;
+
+      case "config":
+        Response.handle(
+          socket,
+          redisProtocolEncoder.encodeRespArr([
+            command[2],
+            command[2] === "dir" ? redisFile.dir : redisFile.dbFileName,
+          ]),
+        );
+        break;
+
+      case "info":
+        Response.handle(
+          socket,
+          redisProtocolEncoder.encodeBulkString(InfoGenerator.generate()),
+        );
+        break;
+
+      case "pong":
+        Pong.exe(socket);
+        break;
+
+      case "ok":
+        Ok.exe(socket);
+        break;
+
+      case "replconf":
+        ReplConf.exe(socket, command);
+        break;
+
+      case "psync":
+        Psync.exe(socket);
+        break;
+
+      case "wait":
+        Wait.exe(socket, command);
+        break;
+
+      case "type":
+        Type.exe(socket, command);
+        break;
+
+      case "xadd":
+        streams.xAdd(socket, command);
+        break;
+
+      case "xrange":
+        streams.xRange(socket, command);
+        break;
+
+      case "xread":
+        streams.xRead(socket, command);
+        break;
+
+      case "incr":
+        Dictionary.incr(socket, command);
+        break;
+
+      case "multi":
+        Transactions.multi(socket);
+        break;
+
+      case "exec":
+        Transactions.exec(socket, this.processCommand.bind(this));
+        break;
+
+      case "discard":
+        Transactions.discard(socket);
+        break;
+
+      case "rpush":
+        list.rPush(socket, command);
+        break;
+
+      case "lrange":
+        list.lRange(socket, command);
+        break;
+
+      case "lpush":
+        list.lPush(socket, command);
+        break;
+
+      case "llen":
+        list.lLen(socket, command);
+        break;
+
+      case "lpop":
+        list.lPop(socket, command);
+        break;
+
+      case "blpop":
+        list.blPop(socket, command);
+        break;
+
+      case "subscribe":
+        channelHandler.subscribe(socket, command);
+        break;
+
+      case "publish":
+        channelHandler.publish(socket, command);
+        break;
+
+      case "unsubscribe":
+        channelHandler.unsubscribe(socket, command);
+        break;
+
+      case "zadd":
+        set.zAdd(socket, command);
+        break;
+
+      case "zrank":
+        set.zRank(socket, command);
+        break;
+
+      case "zrange":
+        set.zRange(socket, command);
+        break;
+
+      case "zcard":
+        set.zCard(socket, command);
+        break;
+
+      case "zscore":
+        set.zScore(socket, command);
+        break;
+
+      case "zrem":
+        set.zRem(socket, command);
+        break;
+
+      case "geoadd":
+        geo.geoAdd(socket, command);
+        break;
+
+      case "geopos":
+        geo.geoPos(socket, command);
+        break;
+
+      case "geodist":
+        geo.geoDist(socket, command);
+        break;
+
+      case "geosearch":
+        geo.geoSearch(socket, command);
+        break;
+
+      case "acl":
+        authentication.acl(socket, command);
+        break;
+
+      case "auth":
+        authentication.auth(socket, command);
+        break;
+
+      default:
         if (
-          !channelHandler.subscribedModeCmds.includes(command[0].toLowerCase())
+          command[0].startsWith("FULLRESYNC") ||
+          command[0].startsWith("REDIS0011")
         ) {
-          socket.write(
-            redisProtocolEncoder.encodeSimpleError(
-              `ERR Can't execute '${command[0]}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context`,
-            ),
-          );
-          return;
+        } else {
+          throw new Error(`Unhandled REDIS command ${command}`);
         }
-      }
+    }
 
-      switch (command[0].toLowerCase()) {
-        case "echo":
-          const echo: string = command[1];
-          Response.handle(socket, redisProtocolEncoder.encodeBulkString(echo));
-          break;
-
-        case "ping":
-          Ping.exe(socket);
-          break;
-
-        case "set":
-          Dictionary.set(command);
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeSimpleString("OK"),
-          );
-          break;
-
-        case "get":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeBulkString(Dictionary.get(command)),
-          );
-          break;
-
-        case "keys":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeRespArr(Dictionary.keys(command)),
-          );
-          break;
-
-        case "config":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeRespArr([
-              command[2],
-              command[2] === "dir" ? redisFile.dir : redisFile.dbFileName,
-            ]),
-          );
-          break;
-
-        case "info":
-          Response.handle(
-            socket,
-            redisProtocolEncoder.encodeBulkString(InfoGenerator.generate()),
-          );
-          break;
-
-        case "pong":
-          Pong.exe(socket);
-          break;
-
-        case "ok":
-          Ok.exe(socket);
-          break;
-
-        case "replconf":
-          ReplConf.exe(socket, command);
-          break;
-
-        case "psync":
-          Psync.exe(socket);
-          break;
-
-        case "wait":
-          Wait.exe(socket, command);
-          break;
-
-        case "type":
-          Type.exe(socket, command);
-          break;
-
-        case "xadd":
-          streams.xAdd(socket, command);
-          break;
-
-        case "xrange":
-          streams.xRange(socket, command);
-          break;
-
-        case "xread":
-          streams.xRead(socket, command);
-          break;
-
-        case "incr":
-          Dictionary.incr(socket, command);
-          break;
-
-        case "multi":
-          Transactions.multi(socket);
-          break;
-
-        case "exec":
-          Transactions.exec(socket, this.processCommand.bind(this));
-          break;
-
-        case "discard":
-          Transactions.discard(socket);
-          break;
-
-        case "rpush":
-          list.rPush(socket, command);
-          break;
-
-        case "lrange":
-          list.lRange(socket, command);
-          break;
-
-        case "lpush":
-          list.lPush(socket, command);
-          break;
-
-        case "llen":
-          list.lLen(socket, command);
-          break;
-
-        case "lpop":
-          list.lPop(socket, command);
-          break;
-
-        case "blpop":
-          list.blPop(socket, command);
-          break;
-
-        case "subscribe":
-          channelHandler.subscribe(socket, command);
-          break;
-
-        case "publish":
-          channelHandler.publish(socket, command);
-          break;
-
-        case "unsubscribe":
-          channelHandler.unsubscribe(socket, command);
-          break;
-
-        case "zadd":
-          set.zAdd(socket, command);
-          break;
-
-        case "zrank":
-          set.zRank(socket, command);
-          break;
-
-        case "zrange":
-          set.zRange(socket, command);
-          break;
-
-        case "zcard":
-          set.zCard(socket, command);
-          break;
-
-        case "zscore":
-          set.zScore(socket, command);
-          break;
-
-        case "zrem":
-          set.zRem(socket, command);
-          break;
-
-        case "geoadd":
-          geo.geoAdd(socket, command);
-          break;
-
-        case "geopos":
-          geo.geoPos(socket, command);
-          break;
-
-        case "geodist":
-          geo.geoDist(socket, command);
-          break;
-
-        case "geosearch":
-          geo.geoSearch(socket, command);
-          break;
-
-        case "acl":
-          authentication.acl(socket, command);
-          break;
-
-        case "auth":
-          authentication.auth(socket, command);
-          break;
-
-        default:
-          if (
-            command[0].startsWith("FULLRESYNC") ||
-            command[0].startsWith("REDIS0011")
-          ) {
-          } else {
-            throw new Error(`Unhandled REDIS command ${command}`);
-          }
-      }
-
-      if (socketsInfo.getInfo(socket).isReplica) {
-        this.processReplicaCommand(socket, command);
-      } else {
-        this.propagateCommand(command);
-      }
+    if (socketsInfo.getInfo(socket).isReplica) {
+      this.processReplicaCommand(socket, command);
+    } else {
+      this.propagateCommand(command);
     }
   }
 

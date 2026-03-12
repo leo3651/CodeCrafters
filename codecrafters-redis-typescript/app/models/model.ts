@@ -40,6 +40,8 @@ export interface SocketInfo {
   blockPopTimeout: Timer | null;
   listElAddedSubscription: Subscription | null;
   subscriptions: { [channelName: string]: Subscription };
+  isAuthenticated: boolean;
+  userName: string;
 }
 
 export type Reply = Buffer | string;

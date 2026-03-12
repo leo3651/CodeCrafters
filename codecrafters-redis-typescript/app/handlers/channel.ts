@@ -7,7 +7,7 @@ import { Response } from "../response";
 
 export class ChannelHandler {
   private channels: Record<string, Subject<string>> = {};
-  public readonly subscribedModeCmds = [
+  private readonly subscribedModeCmds = [
     "subscribe",
     "unsubscribe",
     "psubscribe",
@@ -91,6 +91,21 @@ export class ChannelHandler {
         );
       },
     });
+  }
+
+  public nonSubscribeCmdInSubscribeMode(
+    socket: net.Socket,
+    command: string[],
+  ): boolean {
+    if (socketsInfo.getInfo(socket).executionType === ExecutionType.Subscribe) {
+      if (!this.subscribedModeCmds.includes(command[0].toLowerCase())) {
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      return false;
+    }
   }
 }
 

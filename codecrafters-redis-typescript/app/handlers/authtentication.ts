@@ -3,11 +3,12 @@ import * as net from "net";
 import { Response } from "../response";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 import type { User } from "../models/model";
+import { socketsInfo } from "../socketsInfo";
 
 class Authentication {
   private users: Record<string, User> = {
     default: {
-      flags: new Set("nopass"),
+      flags: new Set(["nopass"]),
       passwords: new Set(),
     },
   };
@@ -17,6 +18,7 @@ class Authentication {
     const password: string = command[2];
 
     if (this.isAuthenticated(userName, password)) {
+      this.markAsAuthenticated(userName, socket);
       Response.handle(socket, redisProtocolEncoder.encodeSimpleString("OK"));
     } else {
       Response.handle(
@@ -26,10 +28,10 @@ class Authentication {
     }
   }
 
-  public acl(socket: net.Socket, command: string[]) {
+  public acl(socket: net.Socket, command: string[]): void {
     switch (command[1].toLowerCase()) {
       case "whoami":
-        this.whoAmI(socket, command);
+        this.whoAmI(socket);
         break;
 
       case "getuser":
@@ -53,8 +55,13 @@ class Authentication {
     }
   }
 
-  private whoAmI(socket: net.Socket, command: string[]) {
-    Response.handle(socket, redisProtocolEncoder.encodeBulkString("default"));
+  private whoAmI(socket: net.Socket): void {
+    Response.handle(
+      socket,
+      redisProtocolEncoder.encodeBulkString(
+        socketsInfo.getInfo(socket).userName,
+      ),
+    );
   }
 
   private getUser(name: string): (string[] | string)[] {
@@ -92,7 +99,33 @@ class Authentication {
     const hashedPassword: string = createHash("sha256")
       .update(password)
       .digest("hex");
+
     return this.users[userName]?.passwords?.has(hashedPassword);
+  }
+
+  private markAsAuthenticated(userName: string, socket: net.Socket) {
+    socketsInfo.getInfo(socket).isAuthenticated = true;
+    socketsInfo.getInfo(socket).userName = userName;
+  }
+
+  public defaultUserIsAuthenticated(): boolean {
+    return this.users.default.flags.has("nopass");
+  }
+
+  public isNonAuthenticatedCommand(socket: net.Socket, command: string[]) {
+    if (socketsInfo.getInfo(socket).isAuthenticated) {
+      return false;
+    } else {
+      if (
+        command[0].toLowerCase() === "auth" ||
+        (command[0].toLowerCase() === "acl" &&
+          command[1].toLowerCase() === "setuser")
+      ) {
+        return false;
+      } else {
+        return true;
+      }
+    }
   }
 }
 

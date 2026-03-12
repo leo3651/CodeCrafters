@@ -10,23 +10,23 @@ export class Wait {
   private static checkIfWaitResolvedInterval: Timer;
 
   public static exe(socket: net.Socket, command: string[]): void {
-    const numOfAckReplicasNeeded: number = Number.parseInt(command[1]);
+    const numberOfAckReplicasNeeded: number = Number.parseInt(command[1]);
     const expireTime: number = Number.parseInt(command[2]);
 
     this.startResolveWaitTimer(socket, expireTime);
     this.askForACK();
-    this.checkIfWaitResolved(socket, numOfAckReplicasNeeded);
+    this.checkIfWaitResolved(socket, numberOfAckReplicasNeeded);
   }
 
   private static askForACK(): void {
     this.askForACKInterval = setInterval(() => {
       socketsInfo.getReplicas().forEach((socketInfo: SocketInfo) => {
-        const respEncodedCommand: string = redisProtocolEncoder.encodeRespArr([
+        const getAckCommand: string = redisProtocolEncoder.encodeRespArr([
           "REPLCONF",
           "GETACK",
           "*",
         ]);
-        Response.handle(socketInfo.socket, respEncodedCommand);
+        Response.handle(socketInfo.socket, getAckCommand);
       });
     }, 20);
   }
@@ -38,7 +38,7 @@ export class Wait {
     this.resolveWaitTimeout = setTimeout(() => {
       this.clearTimers();
 
-      const numOfAckReplicas: number = socketsInfo
+      const numberOfAckReplicas: number = socketsInfo
         .getReplicas()
         .filter(
           (socketInfo) =>
@@ -46,16 +46,16 @@ export class Wait {
             socketInfo.processedBytes + 37 === socketInfo.propagatedBytes,
         ).length;
 
-      Response.handle(socket, `:${numOfAckReplicas}\r\n`);
+      Response.handle(socket, `:${numberOfAckReplicas}\r\n`);
     }, expireTime);
   }
 
   private static checkIfWaitResolved(
     socket: net.Socket,
-    numOfAckReplicasNeeded: number,
+    numberOfAckReplicasNeeded: number,
   ): void {
     this.checkIfWaitResolvedInterval = setInterval(() => {
-      const numOfAckReplicas: number = socketsInfo
+      const numberOfAckReplicas: number = socketsInfo
         .getReplicas()
         .filter(
           (socketInfo) =>
@@ -63,9 +63,9 @@ export class Wait {
             socketInfo.processedBytes + 37 === socketInfo.propagatedBytes,
         ).length;
 
-      if (numOfAckReplicas >= numOfAckReplicasNeeded) {
+      if (numberOfAckReplicas >= numberOfAckReplicasNeeded) {
         this.clearTimers();
-        Response.handle(socket, `:${numOfAckReplicas}\r\n`);
+        Response.handle(socket, `:${numberOfAckReplicas}\r\n`);
       }
     }, 10);
   }

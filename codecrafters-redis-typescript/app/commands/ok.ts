@@ -4,7 +4,7 @@ import { socketsInfo } from "../socketsInfo";
 import { redisProtocolEncoder } from "../protocol/redisProtocolEncoder";
 
 export class Ok {
-  public static exe(socket: net.Socket) {
+  public static exe(socket: net.Socket): void {
     socketsInfo.getInfo(socket).numberOfResponses++;
 
     if (socketsInfo.getInfo(socket).numberOfResponses === 2) {

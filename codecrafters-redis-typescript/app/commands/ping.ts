@@ -5,7 +5,7 @@ import { socketsInfo } from "../socketsInfo";
 import { ExecutionType } from "../models/model";
 
 export class Ping {
-  public static exe(socket: net.Socket) {
+  public static exe(socket: net.Socket): void {
     if (socketsInfo.getInfo(socket).executionType === ExecutionType.Subscribe) {
       socket.write(redisProtocolEncoder.encodeRespArr(["pong", ""]));
     } else {

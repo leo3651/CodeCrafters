@@ -1,5 +1,6 @@
 import * as net from "net";
 import { ExecutionType, type SocketInfo } from "./models/model";
+import { authentication } from "./handlers/authtentication";
 
 class SocketsInfo {
   public sockets: SocketInfo[] = [];
@@ -17,6 +18,8 @@ class SocketsInfo {
       blockPopTimeout: null,
       listElAddedSubscription: null,
       subscriptions: {},
+      isAuthenticated: authentication.defaultUserIsAuthenticated(),
+      userName: "default",
     });
   }
 
