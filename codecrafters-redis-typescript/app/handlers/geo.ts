@@ -5,15 +5,17 @@ import { set } from "./set";
 import { Coordinates, type SetMember } from "../models/model";
 
 class Geo {
-  private readonly MIN_LATITUDE = -85.05112878;
-  private readonly MAX_LATITUDE = 85.05112878;
-  private readonly MIN_LONGITUDE = -180;
-  private readonly MAX_LONGITUDE = 180;
+  private readonly MIN_LATITUDE: number = -85.05112878;
+  private readonly MAX_LATITUDE: number = 85.05112878;
+  private readonly MIN_LONGITUDE: number = -180;
+  private readonly MAX_LONGITUDE: number = 180;
 
-  private readonly LATITUDE_RANGE = this.MAX_LATITUDE - this.MIN_LATITUDE;
-  private readonly LONGITUDE_RANGE = this.MAX_LONGITUDE - this.MIN_LONGITUDE;
+  private readonly LATITUDE_RANGE: number =
+    this.MAX_LATITUDE - this.MIN_LATITUDE;
+  private readonly LONGITUDE_RANGE: number =
+    this.MAX_LONGITUDE - this.MIN_LONGITUDE;
 
-  public geoAdd(socket: net.Socket, command: string[]) {
+  public geoAdd(socket: net.Socket, command: string[]): void {
     const setName: string = command[1];
     const longitude: number = Number.parseFloat(command[2]);
     const latitude: number = Number.parseFloat(command[3]);

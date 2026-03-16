@@ -1,6 +1,6 @@
 import * as net from "net";
 import { ExecutionType, type SocketInfo } from "./models/model";
-import { authentication } from "./handlers/authtentication";
+import { authentication } from "./handlers/authentication";
 
 class SocketsInfo {
   public sockets: SocketInfo[] = [];

@@ -7,7 +7,7 @@ import { Response } from "../response";
 
 export class ChannelHandler {
   private channels: Record<string, Subject<string>> = {};
-  private readonly subscribedModeCmds = [
+  private readonly subscribedModeCmds: string[] = [
     "subscribe",
     "unsubscribe",
     "psubscribe",
@@ -93,7 +93,7 @@ export class ChannelHandler {
     });
   }
 
-  public nonSubscribeCmdInSubscribeMode(
+  public isNonSubscribeCmdInSubscribeMode(
     socket: net.Socket,
     command: string[],
   ): boolean {

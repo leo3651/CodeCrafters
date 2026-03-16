@@ -17,8 +17,8 @@ class Authentication {
     const userName: string = command[1];
     const password: string = command[2];
 
-    if (this.isAuthenticated(userName, password)) {
-      this.markAsAuthenticated(userName, socket);
+    if (this.userNameAndPasswordMatch(userName, password)) {
+      this.markSocketAsAuthenticated(userName, socket);
       Response.handle(socket, redisProtocolEncoder.encodeSimpleString("OK"));
     } else {
       Response.handle(
@@ -38,7 +38,7 @@ class Authentication {
         const userName: string = command[2];
         Response.handle(
           socket,
-          redisProtocolEncoder.encodeRespArr(this.getUser(userName)),
+          redisProtocolEncoder.encodeRespArr(this.getUserAsArr(userName)),
         );
         break;
 
@@ -64,7 +64,7 @@ class Authentication {
     );
   }
 
-  private getUser(name: string): (string[] | string)[] {
+  private getUserAsArr(name: string): (string[] | string)[] {
     const user: User = this.users[name];
     if (!user) {
       return [];
@@ -78,7 +78,7 @@ class Authentication {
     ];
   }
 
-  private setUser(name: string, password: string) {
+  private setUser(name: string, password: string): void {
     const user: User = this.users[name];
     const hashedPassword: string = createHash("sha256")
       .update(password)
@@ -95,7 +95,10 @@ class Authentication {
     user.passwords.add(hashedPassword);
   }
 
-  private isAuthenticated(userName: string, password: string): boolean {
+  private userNameAndPasswordMatch(
+    userName: string,
+    password: string,
+  ): boolean {
     const hashedPassword: string = createHash("sha256")
       .update(password)
       .digest("hex");
@@ -103,7 +106,10 @@ class Authentication {
     return this.users[userName]?.passwords?.has(hashedPassword);
   }
 
-  private markAsAuthenticated(userName: string, socket: net.Socket) {
+  private markSocketAsAuthenticated(
+    userName: string,
+    socket: net.Socket,
+  ): void {
     socketsInfo.getInfo(socket).isAuthenticated = true;
     socketsInfo.getInfo(socket).userName = userName;
   }
@@ -112,7 +118,10 @@ class Authentication {
     return this.users.default.flags.has("nopass");
   }
 
-  public isNonAuthenticatedCommand(socket: net.Socket, command: string[]) {
+  public isNonAuthenticatedCommand(
+    socket: net.Socket,
+    command: string[],
+  ): boolean {
     if (socketsInfo.getInfo(socket).isAuthenticated) {
       return false;
     } else {

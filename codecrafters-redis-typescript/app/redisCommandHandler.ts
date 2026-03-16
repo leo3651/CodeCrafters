@@ -19,7 +19,7 @@ import { streams } from "./handlers/streams";
 import { Ping } from "./commands/ping";
 import { set } from "./handlers/set";
 import { geo } from "./handlers/geo";
-import { authentication } from "./handlers/authtentication";
+import { authentication } from "./handlers/authentication";
 
 class RedisCommandHandler {
   public processCommands(commands: string[][], socket: net.Socket): void {
@@ -47,7 +47,7 @@ class RedisCommandHandler {
       return true;
     }
 
-    if (channelHandler.nonSubscribeCmdInSubscribeMode(socket, command)) {
+    if (channelHandler.isNonSubscribeCmdInSubscribeMode(socket, command)) {
       Response.handle(
         socket,
         redisProtocolEncoder.encodeSimpleError(
@@ -68,7 +68,7 @@ class RedisCommandHandler {
     }
   }
 
-  private executeCommand(socket: net.Socket, command: string[]) {
+  private executeCommand(socket: net.Socket, command: string[]): void {
     switch (command[0].toLowerCase()) {
       case "echo":
         const echo: string = command[1];

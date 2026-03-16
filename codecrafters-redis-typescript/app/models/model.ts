@@ -1,5 +1,5 @@
 import * as net from "net";
-import { Subject, type Subscription } from "rxjs";
+import { type Subscription } from "rxjs";
 
 export enum OpCode {
   EOF = 0xff,

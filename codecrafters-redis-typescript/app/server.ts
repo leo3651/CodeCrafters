@@ -3,7 +3,7 @@ import { redisProtocolParser } from "./protocol/redisProtocolParser";
 import { redisCommandHandler } from "./redisCommandHandler";
 import { socketsInfo } from "./socketsInfo";
 
-export function createServer(port: number) {
+export function createServer(port: number): void {
   const server: net.Server = net.createServer((socket: net.Socket) => {
     console.log(
       `New client connected ${socket.remoteAddress}:${socket.remotePort}`,

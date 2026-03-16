@@ -3,12 +3,12 @@ import { OpCode } from "../models/model";
 
 class RedisFile {
   private redisFileOffset: number = 0;
-  public dir = "";
-  public dbFileName = "";
+  public dir: string = "";
+  public dbFileName: string = "";
 
-  public readonly KEY_VAL_WITHOUT_EXPIRY: { [key: string]: string } = {};
-  public readonly KEY_VAL_WITH_EXPIRY: { [key: string]: string } = {};
-  public readonly AUX_KEY_VAL_PAIRS: { [key: string]: string } = {};
+  public readonly KEY_VAL_WITHOUT_EXPIRY: Record<string, string> = {};
+  public readonly KEY_VAL_WITH_EXPIRY: Record<string, string> = {};
+  public readonly AUX_KEY_VAL_PAIRS: Record<string, string> = {};
 
   private readonly EMPTY_RDB_FILE_HEX: string =
     "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
@@ -76,8 +76,8 @@ class RedisFile {
         break;
 
       case OpCode.RESIZE_DB:
-        this.redisFileOffset++;
         {
+          this.redisFileOffset++;
           const totalHashTableSize: number = this.readLength(data);
           this.redisFileOffset++;
           const expiryHashTableSize: number = this.readLength(data);
