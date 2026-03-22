@@ -1,5 +1,6 @@
-import { CommandOutput, Commands } from "./commands";
+import { Commands } from "./commands";
 import fs from "fs";
+import { CommandOutput } from "./model";
 
 export class Redirect {
   public static handleRedirectCommand(line: string): string {
@@ -8,14 +9,14 @@ export class Redirect {
       line.includes(" 1> ")
         ? " 1> "
         : line.includes(" > ")
-        ? " > "
-        : line.includes(" 2> ")
-        ? " 2> "
-        : line.includes(" >> ")
-        ? " >> "
-        : line.includes(" 1>> ")
-        ? " 1>> "
-        : " 2>> "
+          ? " > "
+          : line.includes(" 2> ")
+            ? " 2> "
+            : line.includes(" >> ")
+              ? " >> "
+              : line.includes(" 1>> ")
+                ? " 1>> "
+                : " 2>> ",
     );
 
     const commandOutput: CommandOutput = Commands.execute(wholeCommand);
@@ -30,7 +31,7 @@ export class Redirect {
         : `${commandOutput.stdout.join("")}`,
       {
         flag: append ? "a" : "w",
-      }
+      },
     );
 
     if (line.includes(" 2> ") || line.includes(" 2>> ")) {

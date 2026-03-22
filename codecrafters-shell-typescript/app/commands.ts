@@ -2,8 +2,7 @@ import path from "path";
 import fs from "fs";
 import { spawnSync, SpawnSyncReturns } from "child_process";
 import { QuotesHandler } from "./helpers";
-
-export type CommandOutput = { stdout: string[]; stderr: string[] };
+import { CommandOutput } from "./model";
 
 export class Commands {
   public static readonly available: string[] = [
@@ -69,7 +68,9 @@ class Exit {
 class Echo {
   public static exe(echo: string): CommandOutput {
     return {
-      stdout: [`${QuotesHandler.handleQuotes(echo).finalString}\n`],
+      stdout: [
+        `${QuotesHandler.handleQuotesAndBackslashes(echo).finalString}\n`,
+      ],
       stderr: [],
     };
   }
@@ -233,14 +234,8 @@ export class ExternalCommand {
   }
 
   public static exeExternalProgram(line: string): CommandOutput {
-    let command: string = "";
-    let args: string[] = [];
-
-    if (line.includes('"') || line.includes("'")) {
-      [command, ...args] = QuotesHandler.handleQuotes(line).filePaths;
-    } else {
-      [command, ...args] = line.split(" ");
-    }
+    const [command, ...args] =
+      QuotesHandler.handleQuotesAndBackslashes(line).words;
 
     let stdout: string[] = [];
     let stderr: string[] = [];
@@ -250,7 +245,7 @@ export class ExternalCommand {
     if (exeFilePath) {
       const result: SpawnSyncReturns<Buffer<ArrayBufferLike>> = spawnSync(
         command,
-        args
+        args,
       );
       stdout = [result.stdout.toString()];
       stderr = [result.stderr.toString()];

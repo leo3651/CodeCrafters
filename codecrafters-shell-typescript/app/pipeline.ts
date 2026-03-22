@@ -4,14 +4,15 @@ import {
   spawn,
 } from "child_process";
 import { PassThrough } from "stream";
-import { CommandOutput, Commands, ExternalCommand } from "./commands";
+import { Commands, ExternalCommand } from "./commands";
 import { QuotesHandler } from "./helpers";
+import { CommandOutput } from "./model";
 
 export class Pipeline {
   public static async exe(line: string): Promise<void> {
     return new Promise((resolve) => {
       const commands: string[] =
-        QuotesHandler.handleQuotes(line).finalString.split(" | ");
+        QuotesHandler.handleQuotesAndBackslashes(line).finalString.split(" | ");
 
       let upstream: NodeJS.ReadableStream | null = null;
       let lastChild: ChildProcess | null = null;
@@ -40,7 +41,7 @@ export class Pipeline {
 
           const child: ChildProcessWithoutNullStreams = spawn(
             exeFilePath,
-            args
+            args,
           );
           lastChild = child;
 
