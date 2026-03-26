@@ -34,10 +34,7 @@ export class Pipeline {
 
         // External exe
         else {
-          const exeFilePath: string = ExternalCommand.checkForExeFile(command);
-          if (!exeFilePath) {
-            throw new Error("Invalid command");
-          }
+          const exeFilePath: string = ExternalCommand.getExeFile(command);
 
           const child: ChildProcessWithoutNullStreams = spawn(
             exeFilePath,

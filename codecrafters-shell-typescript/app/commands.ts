@@ -81,7 +81,7 @@ class Type {
     if (Commands.available.includes(command)) {
       return { stdout: [`${command} is a shell builtin\n`], stderr: [] };
     } else {
-      const exeFilePath: string = ExternalCommand.checkForExeFile(command);
+      const exeFilePath: string = ExternalCommand.getExeFile(command);
 
       if (exeFilePath) {
         return { stdout: [`${command} is ${exeFilePath}\n`], stderr: [] };
@@ -203,7 +203,7 @@ export class History {
 }
 
 export class ExternalCommand {
-  public static checkForExeFile(command: string): string {
+  public static getExeFile(command: string): string {
     let exeFilePath: string = "";
     const pathsEnv: string = process.env.PATH ?? "";
 
@@ -240,7 +240,7 @@ export class ExternalCommand {
     let stdout: string[] = [];
     let stderr: string[] = [];
 
-    const exeFilePath: string = this.checkForExeFile(command);
+    const exeFilePath: string = this.getExeFile(command);
 
     if (exeFilePath) {
       const result: SpawnSyncReturns<Buffer<ArrayBufferLike>> = spawnSync(
