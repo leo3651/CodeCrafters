@@ -3,12 +3,12 @@ import { Commands, History } from "./commands";
 import { Redirect } from "./redirect";
 import { Pipeline } from "./pipeline";
 import { CommandOutput } from "./model";
-import { autocomplete, autocompleteFromHistory } from "./autocomplete";
+import { completer, autocompleteFromHistory } from "./autocomplete";
 
 const rl: Interface = createInterface({
   input: process.stdin,
   output: process.stdout,
-  completer: autocomplete,
+  completer,
   historySize: 0,
 });
 

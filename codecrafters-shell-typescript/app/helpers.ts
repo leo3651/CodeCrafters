@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { Completion } from "./model";
 
 export async function getExecutables(): Promise<string[]> {
   return new Promise((resolve) => {
@@ -23,12 +24,13 @@ export async function getExecutables(): Promise<string[]> {
   });
 }
 
-export function getLongestCommonPrefix(items: string[]): string {
+export function getLongestCommonPrefix(items: Completion[]): string {
   if (items.length === 0) {
     return "";
   }
 
-  const sorted: string[] = [...items].sort();
+  const completions = items.map((item) => item.name);
+  const sorted: string[] = [...completions].sort();
   const first: string = sorted[0];
   const last: string = sorted[sorted.length - 1];
 
