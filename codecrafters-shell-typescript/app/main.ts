@@ -4,6 +4,7 @@ import { Redirect } from "./redirect";
 import { Pipeline } from "./pipeline";
 import { CommandOutput } from "./model";
 import { completer, autocompleteFromHistory } from "./autocomplete";
+import { Jobs } from "./jobs";
 
 const rl: Interface = createInterface({
   input: process.stdin,
@@ -48,6 +49,7 @@ function prompt(): void {
       }
     }
 
+    Jobs.showOnlyDoneJobs();
     prompt();
   });
 }

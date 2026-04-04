@@ -3,6 +3,7 @@ import fs from "fs";
 import { spawnSync, SpawnSyncReturns } from "child_process";
 import { QuotesHandler } from "./helpers";
 import { CommandOutput } from "./model";
+import { Jobs } from "./jobs";
 
 export class Commands {
   public static readonly available: string[] = [
@@ -12,12 +13,15 @@ export class Commands {
     "pwd",
     "cd",
     "history",
+    "jobs",
   ];
 
   public static execute(line: string): CommandOutput {
     const command: string = line.split(" ")[0];
 
-    if (Commands.available.includes(command)) {
+    if (line.endsWith("&")) {
+      return Jobs.runInBackground(line);
+    } else if (Commands.available.includes(command)) {
       return Commands.executeBuiltIn(line);
     } else {
       return ExternalCommand.exeExternalProgram(line);
@@ -46,6 +50,9 @@ export class Commands {
 
       case "history":
         return History.exe(line);
+
+      case "jobs":
+        return Jobs.exe();
 
       default:
         throw new Error("Unknown built in command");
